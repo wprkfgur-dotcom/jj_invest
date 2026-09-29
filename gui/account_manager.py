@@ -115,6 +115,13 @@ class AccountManager:
                 target['current_cash'] = float(initial_seed)
                 target['total_asset'] = float(initial_seed)
 
+        if reserve_ratio is not None or initial_seed is not None:
+            cur_r = float(target.get('reserve_ratio', 0.05))
+            cur_s = float(target.get('initial_seed', 100000.0))
+            if target.get('trade_records'):
+                target['trade_records'][-1]['AK'] = round(cur_s * cur_r, 2)
+                target['trade_records'][-1]['AR'] = round(cur_s * (1.0 - cur_r), 2)
+
         self.save_accounts(accounts)
         return target
 
@@ -390,8 +397,10 @@ class AccountManager:
         prev_cash = float(prev_rec['Cash']) if prev_rec else float(acc['initial_seed'])
         prev_hold = int(prev_rec['Hold']) if prev_rec else 0
         prev_close = float(prev_rec['Close']) if prev_rec else float(close_price)
-        prev_ar = float(prev_rec.get('AR', acc['initial_seed'])) if prev_rec else float(acc['initial_seed'])
-        prev_ak = float(prev_rec.get('AK', 0.0)) if prev_rec else 0.0
+        reserve_ratio = float(acc.get('reserve_ratio', 0.05))
+        init_seed = float(acc.get('initial_seed', 100000.0))
+        cur_ar = round(init_seed * (1.0 - reserve_ratio), 2)
+        cur_ak = round(init_seed * reserve_ratio, 2)
 
         close_p = round(float(close_price), 2)
         chg = (close_p / prev_close - 1.0) if prev_close > 0 else 0.0
@@ -493,8 +502,8 @@ class AccountManager:
             'Cash': new_cash,
             'Hold': new_hold,
             'Asset': new_asset,
-            'AR': prev_ar,
-            'AK': prev_ak,
+            'AR': cur_ar,
+            'AK': cur_ak,
             'Memo': memo,
             'StatusText': status_text,
             'Tag': tag
@@ -766,10 +775,8 @@ class AccountManager:
             target_yield = strat.target_yields.get(mode, 0.0275)
             div = strat.div_rounds.get(mode, 8.0)
             reserve_ratio = float(acc.get('reserve_ratio', 0.05))
-            ar_init = round(initial_seed * (1.0 - reserve_ratio), 2)
-            ak_init = round(initial_seed * reserve_ratio, 2)
-            ar_val = float(last_row.get('AR', ar_init)) if len(last_row) > 0 else ar_init
-            ak_val = float(last_row.get('AK', ak_init)) if len(last_row) > 0 else ak_init
+            ar_val = round(initial_seed * (1.0 - reserve_ratio), 2)
+            ak_val = round(initial_seed * reserve_ratio, 2)
             budget = min(ar_val / div, final_cash) if final_cash >= (ar_val / div) else final_cash
             budget = max(0.0, budget)
 
