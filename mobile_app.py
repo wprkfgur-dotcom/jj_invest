@@ -107,6 +107,60 @@ def show_toast(page: ft.Page, message: str, is_error: bool = False):
     page.update()
 
 
+def get_current_stock_price(ticker: str, fallback_price: float = 0.0) -> float:
+    """
+    야후 파이낸스에서 실시간 또는 최근 종가를 신속하게 조회합니다.
+    조회 실패 시 fallback_price를 반환합니다.
+    """
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        fi = t.fast_info
+        p = fi.get('lastPrice') or fi.get('regularMarketPrice') or fi.get('previousClose')
+        if p is not None and float(p) > 0:
+            return round(float(p), 2)
+    except Exception as ex:
+        print(f"[{ticker}] 실시간 시세 조회 안내: {ex}")
+
+    return round(float(fallback_price), 2) if fallback_price > 0 else 142.50
+
+
+def compute_suggested_trades(close_p: float, buy_orders: list, sell_orders: list):
+    """
+    종가(close_p)를 기준으로 LOC 매수 및 매도 체결 가능 수량을 산출합니다.
+    - 매수: 종가 <= LOC 주문단가인 주문들의 수량 합산
+    - 매도: 종가 >= LOC 주문단가인 주문들의 수량 합산
+    """
+    calc_buy_q = 0
+    calc_sell_q = 0
+
+    for b in buy_orders:
+        bp = b.get('price')
+        if bp is None:
+            raw_p = str(b.get('주문단가', '0')).replace('$', '').replace(',', '').strip()
+            bp = float(raw_p) if raw_p else 0.0
+        bq = b.get('qty')
+        if bq is None:
+            raw_q = str(b.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
+            bq = int(raw_q) if raw_q else 0
+        if bp > 0 and bq > 0 and close_p <= bp + 1e-4:
+            calc_buy_q += bq
+
+    for s in sell_orders:
+        sp = s.get('price')
+        if sp is None:
+            raw_p = str(s.get('주문단가', '0')).replace('$', '').replace(',', '').strip()
+            sp = float(raw_p) if raw_p else 0.0
+        sq = s.get('qty')
+        if sq is None:
+            raw_q = str(s.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
+            sq = int(raw_q) if raw_q else 0
+        if sp > 0 and sq > 0 and close_p >= sp - 1e-4:
+            calc_sell_q += sq
+
+    return calc_buy_q, calc_sell_q
+
+
 # =====================================================================
 # 차트 렌더링 헬퍼 (Matplotlib Base64 이미지 변환)
 # =====================================================================
@@ -549,16 +603,16 @@ class MobileTradingApp:
 
         row1 = ft.Row(
             controls=[
-                make_metric_card("💵 총 예수금 (Cash)", f"${tot_cash:,.0f}", "현금 보유액", ft.Icons.ATTACH_MONEY, PROFIT_GREEN),
-                make_metric_card("📈 주식 평가액", f"${tot_stock_val:,.0f}", "보유 주식 총액", ft.Icons.PIE_CHART_OUTLINE, ft.Colors.PURPLE_300),
+                make_metric_card("총 예수금 (Cash)", f"${tot_cash:,.0f}", "현금 보유액", ft.Icons.ATTACH_MONEY, PROFIT_GREEN),
+                make_metric_card("주식 평가액", f"${tot_stock_val:,.0f}", "보유 주식 총액", ft.Icons.PIE_CHART_OUTLINE, ft.Colors.PURPLE_300),
             ],
             spacing=8
         )
 
         row2 = ft.Row(
             controls=[
-                make_metric_card("🛡️ 총 위기준비금 (AK)", f"${tot_ak:,.0f}", "폭락 안전 준비금", ft.Icons.SHIELD_OUTLINED, RESERVE_AMBER),
-                make_metric_card("🚀 총 실가동 시드 (AR)", f"${tot_ar:,.0f}", "분할 운용 시드", ft.Icons.ROCKET_LAUNCH_OUTLINED, ACCENT_BLUE),
+                make_metric_card("총 위기준비금 (AK)", f"${tot_ak:,.0f}", "폭락 안전 준비금", ft.Icons.SHIELD_OUTLINED, RESERVE_AMBER),
+                make_metric_card("총 실가동 시드 (AR)", f"${tot_ar:,.0f}", "분할 운용 시드", ft.Icons.ROCKET_LAUNCH_OUTLINED, ACCENT_BLUE),
             ],
             spacing=8
         )
@@ -886,11 +940,11 @@ class MobileTradingApp:
                         ft.Row(
                             controls=[
                                 ft.Column([
-                                    ft.Text("🛡️ 위기준비금(AK)", size=10, color=RESERVE_AMBER),
+                                    ft.Text("위기준비금 (AK)", size=10, color=RESERVE_AMBER),
                                     ft.Text(f"${ak_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=RESERVE_AMBER)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("🚀 실가동시드(AR)", size=10, color=ACCENT_BLUE),
+                                    ft.Text("실가동시드 (AR)", size=10, color=ACCENT_BLUE),
                                     ft.Text(f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                                 ], spacing=1),
                                 ft.Column([
@@ -1018,56 +1072,64 @@ class MobileTradingApp:
         )
 
         # -------------------------------------------------------------
-        # 3. 금일 매수매도 표 (LOC 퉁치기 반영)
+        # 3. 금일 매수·매도 주문표 (간결하고 직관적인 수량 중심 UI)
         # -------------------------------------------------------------
         sell_orders = dtl.get('sell_orders', [])
         buy_orders = dtl.get('buy_orders', [])
 
-        # 3-1. 매도 주문 박스 (Rose 테두리 단일 박스)
+        total_sell_qty = 0
+        for s in sell_orders:
+            raw_q = str(s.get('주문수량', s.get('qty', '0'))).replace('주', '').replace(',', '').strip()
+            try:
+                total_sell_qty += int(raw_q)
+            except Exception:
+                pass
+
+        total_buy_qty = 0
+        for b in buy_orders:
+            raw_q = str(b.get('주문수량', b.get('qty', '0'))).replace('주', '').replace(',', '').strip()
+            try:
+                total_buy_qty += int(raw_q)
+            except Exception:
+                pass
+
+        # 3-1. 매도 주문 박스 (단일 테두리 박스 - 심플하게 몇 개 매도할지 직관 표시)
         sell_items = []
         if sell_orders:
-            for i, s in enumerate(sell_orders):
-                title = s.get('구분', 'LOC 익절 매도')
+            for s in sell_orders:
+                title = s.get('구분', 'LOC 매도')
                 price = s.get('주문단가', '$0.00')
-                qty = s.get('주문수량', '0주')
-                amt = s.get('예상금액', '$0.00')
-                cond = s.get('체결조건', '')
-                note = s.get('비고', '')
+                qty = str(s.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
 
                 row = ft.Container(
-                    padding=ft.Padding.symmetric(vertical=6),
-                    content=ft.Column(
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=10),
+                    bgcolor=ft.Colors.with_opacity(0.06, LOSS_RED),
+                    border_radius=8,
+                    content=ft.Row(
                         controls=[
-                            ft.Row(
-                                controls=[
-                                    ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                    ft.Text(f"{price} ({qty})", size=14, weight=ft.FontWeight.BOLD, color=LOSS_RED)
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                            ),
-                            ft.Row(
-                                controls=[
-                                    ft.Text(f"예상금액: {amt}", size=11, color=TEXT_MUTED),
-                                    ft.Text(cond, size=11, color=LOSS_RED, weight=ft.FontWeight.W_500)
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                            ),
-                            ft.Text(f"💡 {note}", size=10, color=TEXT_MUTED) if note else ft.Container()
+                            ft.Row([
+                                ft.Container(
+                                    content=ft.Text("매도", size=10, weight=ft.FontWeight.BOLD, color=LOSS_RED),
+                                    bgcolor=ft.Colors.with_opacity(0.15, LOSS_RED),
+                                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                                    border_radius=4
+                                ),
+                                ft.Text(f"{title} ({price})", size=13, weight=ft.FontWeight.W_600, color=TEXT_PRIMARY),
+                            ], spacing=8),
+                            ft.Text(f"{qty}주 매도", size=14, weight=ft.FontWeight.BOLD, color=LOSS_RED)
                         ],
-                        spacing=2
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     )
                 )
                 sell_items.append(row)
-                if i < len(sell_orders) - 1:
-                    sell_items.append(ft.Divider(color=BORDER_COLOR, height=1))
         else:
             sell_items.append(
                 ft.Container(
-                    padding=ft.Padding.symmetric(vertical=8),
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=8),
                     content=ft.Row(
                         controls=[
-                            ft.Icon(ft.Icons.CHECK, color=TEXT_MUTED, size=16),
-                            ft.Text("당일 체결 대상 매도 주문 없음 (보유분 홀딩)", size=12, color=TEXT_MUTED)
+                            ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color=TEXT_MUTED, size=15),
+                            ft.Text("당일 체결 대상 매도 주문 없음 (보유 홀딩)", size=12, color=TEXT_MUTED)
                         ],
                         spacing=6
                     )
@@ -1076,19 +1138,19 @@ class MobileTradingApp:
 
         sell_box = ft.Container(
             bgcolor=SURFACE_CARD,
-            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, LOSS_RED)),
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.35, LOSS_RED)),
             border_radius=12,
-            padding=14,
+            padding=12,
             content=ft.Column(
                 controls=[
                     ft.Row(
                         controls=[
                             ft.Row([
                                 ft.Icon(ft.Icons.ARROW_UPWARD, color=LOSS_RED, size=16),
-                                ft.Text("🔴 LOC 매도 주문 (전량 청산 / 익절)", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
+                                ft.Text("🔴 매도 주문", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
                             ], spacing=6),
                             ft.Container(
-                                content=ft.Text(f"{len(sell_orders)}건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
+                                content=ft.Text(f"총 {total_sell_qty:,}주 매도" if total_sell_qty > 0 else "0건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.with_opacity(0.15, LOSS_RED),
                                 padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                 border_radius=4
@@ -1103,50 +1165,43 @@ class MobileTradingApp:
             )
         )
 
-        # 3-2. 매수 주문 박스 (Emerald 테두리 단일 박스)
+        # 3-2. 매수 주문 박스 (단일 테두리 박스 - 심플하게 몇 개 매수할지 직관 표시)
         buy_items = []
         if buy_orders:
-            for i, b in enumerate(buy_orders):
+            for b in buy_orders:
                 stage = b.get('호가단계', '순매수')
                 price = b.get('주문단가', '$0.00')
-                qty = b.get('주문수량', '0주')
-                amt = b.get('예상금액', '$0.00')
-                cond = b.get('체결조건', '')
-                note = b.get('비고', '')
+                qty = str(b.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
+                tag_label = stage.split()[0] if ' ' in stage else stage[:3]
 
                 row = ft.Container(
-                    padding=ft.Padding.symmetric(vertical=6),
-                    content=ft.Column(
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=10),
+                    bgcolor=ft.Colors.with_opacity(0.06, PROFIT_GREEN),
+                    border_radius=8,
+                    content=ft.Row(
                         controls=[
-                            ft.Row(
-                                controls=[
-                                    ft.Text(stage, size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                    ft.Text(f"{price} ({qty})", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                            ),
-                            ft.Row(
-                                controls=[
-                                    ft.Text(f"예상금액: {amt}", size=11, color=TEXT_MUTED),
-                                    ft.Text(cond, size=11, color=PROFIT_GREEN, weight=ft.FontWeight.W_500)
-                                ],
-                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                            ),
-                            ft.Text(f"💡 {note}", size=10, color=TEXT_MUTED) if note else ft.Container()
+                            ft.Row([
+                                ft.Container(
+                                    content=ft.Text(tag_label, size=10, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
+                                    bgcolor=ft.Colors.with_opacity(0.15, PROFIT_GREEN),
+                                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                                    border_radius=4
+                                ),
+                                ft.Text(f"{stage} ({price})", size=13, weight=ft.FontWeight.W_600, color=TEXT_PRIMARY),
+                            ], spacing=8),
+                            ft.Text(f"{qty}주 매수", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
                         ],
-                        spacing=2
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     )
                 )
                 buy_items.append(row)
-                if i < len(buy_orders) - 1:
-                    buy_items.append(ft.Divider(color=BORDER_COLOR, height=1))
         else:
             buy_items.append(
                 ft.Container(
-                    padding=ft.Padding.symmetric(vertical=8),
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=8),
                     content=ft.Row(
                         controls=[
-                            ft.Icon(ft.Icons.CHECK, color=TEXT_MUTED, size=16),
+                            ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color=TEXT_MUTED, size=15),
                             ft.Text("당일 체결 대상 매수 주문 없음", size=12, color=TEXT_MUTED)
                         ],
                         spacing=6
@@ -1158,17 +1213,17 @@ class MobileTradingApp:
             bgcolor=SURFACE_CARD,
             border=ft.Border.all(1, ft.Colors.with_opacity(0.35, PROFIT_GREEN)),
             border_radius=12,
-            padding=14,
+            padding=12,
             content=ft.Column(
                 controls=[
                     ft.Row(
                         controls=[
                             ft.Row([
                                 ft.Icon(ft.Icons.ARROW_DOWNWARD, color=PROFIT_GREEN, size=16),
-                                ft.Text("🟢 LOC 매수 주문 (1차 ~ 4차 분할 순매수)", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
+                                ft.Text("🟢 매수 주문", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
                             ], spacing=6),
                             ft.Container(
-                                content=ft.Text(f"{len(buy_orders)}건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
+                                content=ft.Text(f"총 {total_buy_qty:,}주 매수" if total_buy_qty > 0 else "0건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.with_opacity(0.15, PROFIT_GREEN),
                                 padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                 border_radius=4
@@ -1196,51 +1251,79 @@ class MobileTradingApp:
         )
 
         # -------------------------------------------------------------
-        # 4. 거래 내역 & 일일 정산 입력 폼
+        # 4. 실시간 시세 조회 및 일일 정산 입력 폼
         # -------------------------------------------------------------
-        default_buy_q = 0
-        if buy_orders:
+        records = acc.get('trade_records', [])
+        fallback_p = latest_price
+        if fallback_p <= 0 and records:
+            fallback_p = float(records[-1].get('Close', 142.50))
+        elif fallback_p <= 0:
+            fallback_p = 142.50
+
+        real_close = get_current_stock_price(ticker, fallback_price=fallback_p)
+        calc_buy_q, calc_sell_q = compute_suggested_trades(real_close, buy_orders, sell_orders)
+
+        # 첫날 신규 계좌이고 매수 대기 중인데 계산이 0이면 1차 주문 수량으로 기본 제안
+        if calc_buy_q == 0 and not records and buy_orders:
             try:
-                raw_q = str(buy_orders[0].get('주문수량', '0')).replace('주', '').replace(',', '').strip()
-                default_buy_q = int(raw_q)
+                calc_buy_q = int(str(buy_orders[0].get('주문수량', '0')).replace('주', '').replace(',', '').strip())
             except Exception:
-                default_buy_q = 0
+                pass
 
         close_field = ft.TextField(
-            label="당일 종가 ($)",
-            value=f"{latest_price:.2f}" if latest_price > 0 else "142.50",
+            label="당일종가($)",
+            label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
+            value=f"{real_close:.2f}",
             keyboard_type=ft.KeyboardType.NUMBER,
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
             color=TEXT_PRIMARY,
-            text_size=13,
-            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            text_size=12,
+            text_align=ft.TextAlign.RIGHT,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
             expand=True
         )
 
         buy_qty_field = ft.TextField(
-            label="체결 매수량(주)",
-            value=str(default_buy_q),
+            label="체결매수(주)",
+            label_style=ft.TextStyle(size=11, color=PROFIT_GREEN),
+            value=str(calc_buy_q),
             keyboard_type=ft.KeyboardType.NUMBER,
             border_color=BORDER_COLOR,
             focused_border_color=PROFIT_GREEN,
             color=TEXT_PRIMARY,
-            text_size=13,
-            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            text_size=12,
+            text_align=ft.TextAlign.RIGHT,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
             expand=True
         )
 
         sell_qty_field = ft.TextField(
-            label="체결 매도량(주)",
-            value="0",
+            label="체결매도(주)",
+            label_style=ft.TextStyle(size=11, color=LOSS_RED),
+            value=str(calc_sell_q),
             keyboard_type=ft.KeyboardType.NUMBER,
             border_color=BORDER_COLOR,
             focused_border_color=LOSS_RED,
             color=TEXT_PRIMARY,
-            text_size=13,
-            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            text_size=12,
+            text_align=ft.TextAlign.RIGHT,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
             expand=True
         )
+
+        def on_close_changed(e):
+            try:
+                val = float(close_field.value.strip())
+                b_q, s_q = compute_suggested_trades(val, buy_orders, sell_orders)
+                buy_qty_field.value = str(b_q)
+                sell_qty_field.value = str(s_q)
+                buy_qty_field.update()
+                sell_qty_field.update()
+            except Exception:
+                pass
+
+        close_field.on_change = on_close_changed
 
         def handle_settle(e):
             try:
@@ -1270,8 +1353,7 @@ class MobileTradingApp:
                 content=ft.Column(
                     controls=[
                         ft.Row([
-                            ft.Icon(ft.Icons.FLASH_ON, color=PROFIT_GREEN, size=18),
-                            ft.Text(f"일일 정산 및 Next Day ({curr_d})", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ft.Text(f"일일 정산 ({curr_d})", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                         ], spacing=6),
                         ft.Row([close_field, buy_qty_field, sell_qty_field], spacing=6),
                         ft.Row(
@@ -1303,38 +1385,97 @@ class MobileTradingApp:
             )
         )
 
-        # 거래 내역 리스트 (역순)
-        records = acc.get('trade_records', [])
-        history_cards = []
-        for r in reversed(records[-10:]):
-            r_d = r.get('Date', '')
-            r_cp = float(r.get('Close', 0.0))
-            r_bq = int(r.get('BuyQty', r.get('R', 0)))
-            r_sq = int(r.get('SellQty', 0))
-            r_p = float(r.get('Profit', 0.0) or 0.0)
-            r_asset = float(r.get('Asset', 0.0))
+        # -------------------------------------------------------------
+        # 5. 최근 거래 내역 (엑셀 형식 표 & 길게 탭/클릭하여 수정)
+        # -------------------------------------------------------------
+        table_rows = []
+        if records:
+            for orig_idx, r in reversed(list(enumerate(records))):
+                r_d = str(r.get('Date', ''))
+                r_cp = float(r.get('Close', 0.0))
+                r_bq = int(r.get('BuyQty', r.get('R', 0)))
+                r_sq = int(r.get('SellQty', 0))
+                r_asset = float(r.get('Asset', 0.0))
+                r_p = float(r.get('Profit', 0.0) or 0.0)
 
-            history_cards.append(
-                ft.Container(
-                    bgcolor=SURFACE_CARD,
-                    border=ft.Border.all(1, BORDER_COLOR),
-                    border_radius=8,
-                    padding=10,
-                    content=ft.Row(
-                        controls=[
-                            ft.Column([
-                                ft.Text(r_d, size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                ft.Text(f"종가 ${r_cp:.2f} | 매수 {r_bq}주 / 매도 {r_sq}주", size=10, color=TEXT_MUTED)
-                            ], spacing=1, expand=True),
-                            ft.Column([
-                                ft.Text(f"${r_asset:,.0f}", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                ft.Text(f"손익: {r_p:+,.0f}$", size=10, color=PROFIT_GREEN if r_p >= 0 else LOSS_RED)
-                            ], horizontal_alignment=ft.CrossAxisAlignment.END, spacing=1)
+                p_str = f"{r_p:+,.0f}$" if r_p != 0 else "$0"
+                p_color = PROFIT_GREEN if r_p > 0 else (LOSS_RED if r_p < 0 else TEXT_MUTED)
+
+                def make_edit_fn(idx_to_edit):
+                    return lambda _: self.open_edit_trade_dialog(acc_id, idx_to_edit)
+
+                table_rows.append(
+                    ft.DataRow(
+                        cells=[
+                            ft.DataCell(ft.Text(r_d, size=11, color=TEXT_PRIMARY, weight=ft.FontWeight.W_500)),
+                            ft.DataCell(ft.Text(f"${r_cp:.2f}", size=11, color=TEXT_PRIMARY)),
+                            ft.DataCell(ft.Text(f"{r_bq:,}", size=11, color=PROFIT_GREEN if r_bq > 0 else TEXT_MUTED, weight=ft.FontWeight.BOLD if r_bq > 0 else ft.FontWeight.NORMAL)),
+                            ft.DataCell(ft.Text(f"{r_sq:,}", size=11, color=LOSS_RED if r_sq > 0 else TEXT_MUTED, weight=ft.FontWeight.BOLD if r_sq > 0 else ft.FontWeight.NORMAL)),
+                            ft.DataCell(ft.Text(f"${r_asset:,.0f}", size=11, color=TEXT_PRIMARY)),
+                            ft.DataCell(ft.Text(p_str, size=11, color=p_color, weight=ft.FontWeight.W_600)),
+                            ft.DataCell(
+                                ft.IconButton(
+                                    icon=ft.Icons.EDIT_OUTLINED,
+                                    icon_size=15,
+                                    icon_color=ACCENT_BLUE,
+                                    tooltip="기록 수정",
+                                    on_click=make_edit_fn(orig_idx)
+                                )
+                            ),
                         ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        on_long_press=make_edit_fn(orig_idx)
                     )
                 )
+
+            history_table = ft.DataTable(
+                columns=[
+                    ft.DataColumn(ft.Text("날짜", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY)),
+                    ft.DataColumn(ft.Text("종가", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY), numeric=True),
+                    ft.DataColumn(ft.Text("매수", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY), numeric=True),
+                    ft.DataColumn(ft.Text("매도", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY), numeric=True),
+                    ft.DataColumn(ft.Text("평가자산", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY), numeric=True),
+                    ft.DataColumn(ft.Text("손익", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY), numeric=True),
+                    ft.DataColumn(ft.Text("수정", weight=ft.FontWeight.BOLD, size=11, color=TEXT_SECONDARY)),
+                ],
+                rows=table_rows,
+                border=ft.Border.all(1, BORDER_COLOR),
+                heading_row_color=ft.Colors.with_opacity(0.35, BG_DARK),
+                data_row_min_height=38,
+                data_row_max_height=42,
+                column_spacing=12,
+                horizontal_margin=8,
             )
+
+            history_view = ft.Container(
+                bgcolor=SURFACE_CARD,
+                border=ft.Border.all(1, BORDER_COLOR),
+                border_radius=10,
+                padding=4,
+                content=ft.Row(
+                    controls=[history_table],
+                    scroll=ft.ScrollMode.ALWAYS
+                )
+            )
+        else:
+            history_view = ft.Container(
+                bgcolor=SURFACE_CARD,
+                border=ft.Border.all(1, BORDER_COLOR),
+                border_radius=10,
+                padding=20,
+                alignment=ft.Alignment.CENTER,
+                content=ft.Text("기록된 거래 내역이 없습니다.", size=12, color=TEXT_MUTED)
+            )
+
+        history_section = ft.Column(
+            controls=[
+                ft.Row([
+                    ft.Text("최근 거래 내역", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                    ft.Text("(길게 탭 또는 ✏️ 눌러 수정)", size=10, color=TEXT_SECONDARY),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                history_view
+            ],
+            spacing=6
+        )
 
         return ft.ListView(
             controls=[
@@ -1346,8 +1487,7 @@ class MobileTradingApp:
                 ft.Container(height=6),
                 settle_card,
                 ft.Container(height=6),
-                ft.Text("최근 거래 내역", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                *history_cards,
+                history_section,
                 ft.Container(height=20)
             ],
             spacing=8,
@@ -2029,6 +2169,132 @@ class MobileTradingApp:
             bgcolor=SURFACE_CARD
         )
         self.page.show_dialog(dlg)
+
+    def open_edit_trade_dialog(self, acc_id: str, record_idx: int):
+        """
+        거래 기록을 직접 수정하는 대화상자를 엽니다.
+        """
+        acc = next((a for a in self.accounts if a['id'] == acc_id), None)
+        if not acc:
+            return
+        records = acc.get('trade_records', [])
+        if record_idx < 0 or record_idx >= len(records):
+            return
+
+        target = records[record_idx]
+        cur_d = str(target.get('Date', ''))
+        cur_close = float(target.get('Close', 0.0))
+        cur_bq = int(target.get('BuyQty', target.get('R', 0)))
+        cur_sq = int(target.get('SellQty', 0))
+        cur_profit = float(target.get('Profit', 0.0) or 0.0)
+
+        date_f = ft.TextField(
+            label="거래일자 (YYYY-MM-DD)",
+            value=cur_d,
+            border_color=BORDER_COLOR,
+            focused_border_color=ACCENT_BLUE,
+            color=TEXT_PRIMARY,
+            text_size=12
+        )
+        close_f = ft.TextField(
+            label="종가 ($)",
+            value=f"{cur_close:.2f}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border_color=BORDER_COLOR,
+            focused_border_color=ACCENT_BLUE,
+            color=TEXT_PRIMARY,
+            text_size=12
+        )
+        buy_q_f = ft.TextField(
+            label="체결 매수량 (주)",
+            value=str(cur_bq),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border_color=BORDER_COLOR,
+            focused_border_color=PROFIT_GREEN,
+            color=TEXT_PRIMARY,
+            text_size=12
+        )
+        sell_q_f = ft.TextField(
+            label="체결 매도량 (주)",
+            value=str(cur_sq),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border_color=BORDER_COLOR,
+            focused_border_color=LOSS_RED,
+            color=TEXT_PRIMARY,
+            text_size=12
+        )
+        profit_f = ft.TextField(
+            label="실현 손익 ($)",
+            value=f"{cur_profit:.2f}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border_color=BORDER_COLOR,
+            focused_border_color=PROFIT_GREEN,
+            color=TEXT_PRIMARY,
+            text_size=12
+        )
+
+        def handle_save_edit(e):
+            try:
+                n_date = date_f.value.strip()
+                n_close = float(close_f.value.strip())
+                n_bq = int(buy_q_f.value.strip())
+                n_sq = int(sell_q_f.value.strip())
+                n_profit = float(profit_f.value.strip())
+
+                target['Date'] = n_date
+                target['Close'] = n_close
+                target['BuyQty'] = n_bq
+                target['R'] = n_bq
+                target['SellQty'] = n_sq
+                target['Profit'] = n_profit
+                if n_bq > 0 and (target.get('BuyPrice') is None or float(target.get('BuyPrice', 0.0)) <= 0):
+                    target['BuyPrice'] = n_close
+
+                # Recompute Asset
+                target_hold = int(target.get('Hold', 0))
+                target_cash = float(target.get('Cash', 0.0))
+                target['Asset'] = round(target_cash + n_close * target_hold, 2)
+
+                self.am.save_accounts(self.accounts)
+                self.page.pop_dialog()
+                show_toast(self.page, f"{n_date} 거래 내역이 성공적으로 수정되었습니다.")
+                self.reload_data()
+            except Exception as ex:
+                show_toast(self.page, f"수정 저장 오류: {ex}", is_error=True)
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Row([
+                ft.Icon(ft.Icons.EDIT_NOTE, color=ACCENT_BLUE),
+                ft.Text(f"거래 기록 수정 ({cur_d})", weight=ft.FontWeight.BOLD, size=15, color=TEXT_PRIMARY)
+            ], spacing=6),
+            content=ft.Container(
+                width=340,
+                content=ft.Column(
+                    controls=[
+                        date_f,
+                        close_f,
+                        ft.Row([buy_q_f, sell_q_f], spacing=6),
+                        profit_f,
+                        ft.Text("💡 수치 변경 후 [수정 저장]을 누르면 계좌 데이터가 갱신됩니다.", size=10, color=TEXT_SECONDARY)
+                    ],
+                    spacing=10,
+                    tight=True
+                )
+            ),
+            actions=[
+                ft.TextButton("취소", on_click=lambda _: self.page.pop_dialog()),
+                ft.FilledButton(
+                    "수정 저장",
+                    style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
+                    on_click=handle_save_edit
+                )
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            bgcolor=SURFACE_CARD
+        )
+        self.page.show_dialog(dlg)
+
 
 
 # =====================================================================
