@@ -14,6 +14,7 @@ import os
 import io
 import base64
 import subprocess
+import re
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -161,14 +162,37 @@ def compute_suggested_trades(close_p: float, buy_orders: list, sell_orders: list
     return calc_buy_q, calc_sell_q
 
 
+def extract_pct_str(order: dict, ref_price: float) -> str:
+    """
+    주문 정보에서 가격 변동률 문자열(예: (-17.0%), (+2.7%))을 추출하거나 계산합니다.
+    """
+    for key in ['체결조건', '비고', '호가단계', '구분']:
+        val = str(order.get(key, ''))
+        m = re.search(r'\(([+-]?\d+\.?\d*%)\)', val)
+        if m:
+            return m.group(0)
+
+    op = order.get('price')
+    if op is None:
+        try:
+            op = float(str(order.get('주문단가', '0')).replace('$', '').replace(',', '').strip())
+        except Exception:
+            op = 0.0
+    if op > 0 and ref_price > 0:
+        diff = (op - ref_price) / ref_price * 100.0
+        return f"({diff:+.1f}%)"
+    return ""
+
+
 # =====================================================================
 # 차트 렌더링 헬퍼 (Matplotlib Base64 이미지 변환)
 # =====================================================================
 def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float) -> str:
     """
-    전체 계좌의 통합 자산 추이 그래프를 생성하여 base64 URI로 반환합니다.
+    전체 계좌의 통합 자산 추이 그래프를 고해상도로 생성하여 base64 URI로 반환합니다.
+    (InteractiveViewer에서 부드럽게 좌우 이동 및 확대 가능)
     """
-    fig, ax = plt.subplots(figsize=(5.2, 2.5), facecolor=SURFACE_CARD)
+    fig, ax = plt.subplots(figsize=(7.5, 2.8), facecolor=SURFACE_CARD)
     ax.set_facecolor(SURFACE_CARD)
 
     all_series = []
@@ -189,18 +213,18 @@ def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float) ->
         x_vals = dates
         y_vals = [total_portfolio_asset] * 5
 
-    ax.plot(x_vals, y_vals, color=ACCENT_BLUE, linewidth=2.2, label='통합 자산')
+    ax.plot(x_vals, y_vals, color=ACCENT_BLUE, linewidth=2.4, label='통합 자산')
     min_y = min(y_vals) if len(y_vals) > 0 else 0.0
-    ax.fill_between(x_vals, y_vals, min_y * 0.98, color=ACCENT_BLUE, alpha=0.15)
+    ax.fill_between(x_vals, y_vals, min_y * 0.98, color=ACCENT_BLUE, alpha=0.18)
 
     ax.tick_params(colors=TEXT_SECONDARY, labelsize=8)
     for spine in ax.spines.values():
         spine.set_color(BORDER_COLOR)
-    ax.grid(True, linestyle='--', alpha=0.2, color=TEXT_SECONDARY)
+    ax.grid(True, linestyle='--', alpha=0.25, color=TEXT_SECONDARY)
     fig.autofmt_xdate(rotation=20)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=100, facecolor=fig.get_facecolor())
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=140, facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode('utf-8')
@@ -209,29 +233,30 @@ def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float) ->
 
 def render_backtest_chart(df_strat: pd.DataFrame, df_bnh: pd.DataFrame, strat_name: str, ticker: str) -> str:
     """
-    백테스트 결과(전략 vs 단순보유) 자산 비교 차트를 생성하여 base64 URI로 반환합니다.
+    백테스트 결과(전략 vs 단순보유) 자산 비교 차트를 고해상도로 생성하여 base64 URI로 반환합니다.
+    (InteractiveViewer에서 부드럽게 좌우 이동 및 확대 가능)
     """
-    fig, ax = plt.subplots(figsize=(5.2, 2.7), facecolor=SURFACE_CARD)
+    fig, ax = plt.subplots(figsize=(7.5, 3.0), facecolor=SURFACE_CARD)
     ax.set_facecolor(SURFACE_CARD)
 
     dates = pd.to_datetime(df_strat['Date'])
     strat_assets = df_strat['Asset'].values
-    ax.plot(dates, strat_assets, color=PROFIT_GREEN, linewidth=2.0, label=strat_name)
+    ax.plot(dates, strat_assets, color=PROFIT_GREEN, linewidth=2.2, label=strat_name)
 
     if df_bnh is not None and not df_bnh.empty:
         bnh_dates = pd.to_datetime(df_bnh['Date'])
         bnh_assets = df_bnh['Asset'].values
-        ax.plot(bnh_dates, bnh_assets, color=TEXT_SECONDARY, linewidth=1.4, linestyle='--', label=f'{ticker} 단순보유')
+        ax.plot(bnh_dates, bnh_assets, color=TEXT_SECONDARY, linewidth=1.5, linestyle='--', label=f'{ticker} 단순보유')
 
     ax.tick_params(colors=TEXT_SECONDARY, labelsize=8)
     for spine in ax.spines.values():
         spine.set_color(BORDER_COLOR)
-    ax.grid(True, linestyle='--', alpha=0.2, color=TEXT_SECONDARY)
+    ax.grid(True, linestyle='--', alpha=0.25, color=TEXT_SECONDARY)
     ax.legend(facecolor=SURFACE_CARD, edgecolor=BORDER_COLOR, labelcolor=TEXT_PRIMARY, fontsize=8, loc='upper left')
     fig.autofmt_xdate(rotation=20)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=100, facecolor=fig.get_facecolor())
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=140, facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode('utf-8')
@@ -564,13 +589,28 @@ class MobileTradingApp:
                     controls=[
                         ft.Row(
                             controls=[
-                                ft.Icon(ft.Icons.SHOW_CHART, size=18, color=ACCENT_BLUE),
-                                ft.Text("포트폴리오 자산 성장 추이", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                ft.Row([
+                                    ft.Icon(ft.Icons.SHOW_CHART, size=18, color=ACCENT_BLUE),
+                                    ft.Text("포트폴리오 자산 성장 추이", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                ], spacing=6),
+                                ft.Text("드래그: 이동 | 핀치: 확대", size=10, color=TEXT_MUTED)
                             ],
-                            spacing=6
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                         ),
                         ft.Container(height=4),
-                        ft.Image(src=chart_base64, fit="contain", border_radius=8),
+                        ft.Container(
+                            height=200,
+                            border_radius=8,
+                            clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                            content=ft.InteractiveViewer(
+                                content=ft.Image(src=chart_base64, fit="contain", width=720, height=200),
+                                min_scale=0.8,
+                                max_scale=3.5,
+                                pan_enabled=True,
+                                scale_enabled=True,
+                                clip_behavior=ft.ClipBehavior.HARD_EDGE
+                            )
+                        ),
                     ]
                 )
             )
@@ -779,17 +819,7 @@ class MobileTradingApp:
                                         ],
                                         spacing=6
                                     ),
-                                    ft.Container(
-                                        content=ft.Text(
-                                            "🟢 주문대기" if op_state == 'WAITING_FOR_FILL' else "⚪ 마감완료",
-                                            size=11,
-                                            color=PROFIT_GREEN if op_state == 'WAITING_FOR_FILL' else TEXT_SECONDARY,
-                                            weight=ft.FontWeight.BOLD
-                                        ),
-                                        bgcolor=ft.Colors.with_opacity(0.12, PROFIT_GREEN if op_state == 'WAITING_FOR_FILL' else TEXT_SECONDARY),
-                                        padding=ft.Padding.symmetric(horizontal=7, vertical=2),
-                                        border_radius=8
-                                    )
+                                    ft.Icon(ft.Icons.CHEVRON_RIGHT, color=TEXT_MUTED, size=20)
                                 ],
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                             ),
@@ -906,19 +936,8 @@ class MobileTradingApp:
                                     ],
                                     spacing=2
                                 ),
-                                ft.Container(
-                                    content=ft.Text(
-                                        "🟢 주문대기" if op_state == 'WAITING_FOR_FILL' else "⚪ 마감완료",
-                                        size=11,
-                                        color=PROFIT_GREEN if op_state == 'WAITING_FOR_FILL' else TEXT_SECONDARY,
-                                        weight=ft.FontWeight.BOLD
-                                    ),
-                                    bgcolor=ft.Colors.with_opacity(0.12, PROFIT_GREEN if op_state == 'WAITING_FOR_FILL' else TEXT_SECONDARY),
-                                    padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-                                    border_radius=8
-                                )
                             ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            alignment=ft.MainAxisAlignment.START
                         ),
                         ft.Container(height=6),
                         ft.Row(
@@ -1093,13 +1112,14 @@ class MobileTradingApp:
             except Exception:
                 pass
 
-        # 3-1. 매도 주문 박스 (단일 테두리 박스 - 심플하게 몇 개 매도할지 직관 표시)
+        # 3-1. 매도 주문 박스 (얼마에 몇 주 걸건지 + 변동률만 심플 표시)
         sell_items = []
+        ref_p = latest_price if latest_price > 0 else 142.29
         if sell_orders:
             for s in sell_orders:
-                title = s.get('구분', 'LOC 매도')
-                price = s.get('주문단가', '$0.00')
-                qty = str(s.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
+                price = str(s.get('주문단가', '$0.00'))
+                qty = str(s.get('주문수량', s.get('qty', '0'))).replace('주', '').replace(',', '').strip()
+                pct_str = extract_pct_str(s, ref_p)
 
                 row = ft.Container(
                     padding=ft.Padding.symmetric(vertical=8, horizontal=10),
@@ -1108,15 +1128,10 @@ class MobileTradingApp:
                     content=ft.Row(
                         controls=[
                             ft.Row([
-                                ft.Container(
-                                    content=ft.Text("매도", size=10, weight=ft.FontWeight.BOLD, color=LOSS_RED),
-                                    bgcolor=ft.Colors.with_opacity(0.15, LOSS_RED),
-                                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                                    border_radius=4
-                                ),
-                                ft.Text(f"{title} ({price})", size=13, weight=ft.FontWeight.W_600, color=TEXT_PRIMARY),
-                            ], spacing=8),
-                            ft.Text(f"{qty}주 매도", size=14, weight=ft.FontWeight.BOLD, color=LOSS_RED)
+                                ft.Text(price, size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                ft.Text(pct_str, size=13, weight=ft.FontWeight.W_600, color=LOSS_RED if '-' in pct_str else PROFIT_GREEN) if pct_str else ft.Container(),
+                            ], spacing=6),
+                            ft.Text(f"{qty}주", size=15, weight=ft.FontWeight.BOLD, color=LOSS_RED)
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     )
@@ -1129,7 +1144,7 @@ class MobileTradingApp:
                     content=ft.Row(
                         controls=[
                             ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color=TEXT_MUTED, size=15),
-                            ft.Text("당일 체결 대상 매도 주문 없음 (보유 홀딩)", size=12, color=TEXT_MUTED)
+                            ft.Text("체결 대상 매도 주문 없음 (보유 홀딩)", size=12, color=TEXT_MUTED)
                         ],
                         spacing=6
                     )
@@ -1150,7 +1165,7 @@ class MobileTradingApp:
                                 ft.Text("🔴 매도 주문", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
                             ], spacing=6),
                             ft.Container(
-                                content=ft.Text(f"총 {total_sell_qty:,}주 매도" if total_sell_qty > 0 else "0건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
+                                content=ft.Text(f"총 {total_sell_qty:,}주" if total_sell_qty > 0 else "0건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.with_opacity(0.15, LOSS_RED),
                                 padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                 border_radius=4
@@ -1165,14 +1180,13 @@ class MobileTradingApp:
             )
         )
 
-        # 3-2. 매수 주문 박스 (단일 테두리 박스 - 심플하게 몇 개 매수할지 직관 표시)
+        # 3-2. 매수 주문 박스 (얼마에 몇 주 걸건지 + 변동률만 심플 표시)
         buy_items = []
         if buy_orders:
             for b in buy_orders:
-                stage = b.get('호가단계', '순매수')
-                price = b.get('주문단가', '$0.00')
-                qty = str(b.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
-                tag_label = stage.split()[0] if ' ' in stage else stage[:3]
+                price = str(b.get('주문단가', '$0.00'))
+                qty = str(b.get('주문수량', b.get('qty', '0'))).replace('주', '').replace(',', '').strip()
+                pct_str = extract_pct_str(b, ref_p)
 
                 row = ft.Container(
                     padding=ft.Padding.symmetric(vertical=8, horizontal=10),
@@ -1181,15 +1195,10 @@ class MobileTradingApp:
                     content=ft.Row(
                         controls=[
                             ft.Row([
-                                ft.Container(
-                                    content=ft.Text(tag_label, size=10, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
-                                    bgcolor=ft.Colors.with_opacity(0.15, PROFIT_GREEN),
-                                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                                    border_radius=4
-                                ),
-                                ft.Text(f"{stage} ({price})", size=13, weight=ft.FontWeight.W_600, color=TEXT_PRIMARY),
-                            ], spacing=8),
-                            ft.Text(f"{qty}주 매수", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
+                                ft.Text(price, size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                ft.Text(pct_str, size=13, weight=ft.FontWeight.W_600, color=LOSS_RED if '-' in pct_str else PROFIT_GREEN) if pct_str else ft.Container(),
+                            ], spacing=6),
+                            ft.Text(f"{qty}주", size=15, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                     )
@@ -1202,7 +1211,7 @@ class MobileTradingApp:
                     content=ft.Row(
                         controls=[
                             ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, color=TEXT_MUTED, size=15),
-                            ft.Text("당일 체결 대상 매수 주문 없음", size=12, color=TEXT_MUTED)
+                            ft.Text("체결 대상 매수 주문 없음", size=12, color=TEXT_MUTED)
                         ],
                         spacing=6
                     )
@@ -1223,7 +1232,7 @@ class MobileTradingApp:
                                 ft.Text("🟢 매수 주문", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
                             ], spacing=6),
                             ft.Container(
-                                content=ft.Text(f"총 {total_buy_qty:,}주 매수" if total_buy_qty > 0 else "0건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
+                                content=ft.Text(f"총 {total_buy_qty:,}주" if total_buy_qty > 0 else "0건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.with_opacity(0.15, PROFIT_GREEN),
                                 padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                 border_radius=4
@@ -1712,9 +1721,27 @@ class MobileTradingApp:
                     padding=12,
                     content=ft.Column(
                         controls=[
-                            ft.Text(f"{res['strategy']} vs 단순보유 자산 곡선", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                            ft.Row(
+                                controls=[
+                                    ft.Text(f"{res['strategy']} vs 단순보유 자산 곡선", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                    ft.Text("드래그: 이동 | 핀치: 확대", size=10, color=TEXT_MUTED)
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            ),
                             ft.Container(height=4),
-                            ft.Image(src=res['chart_b64'], fit="contain", border_radius=8)
+                            ft.Container(
+                                height=220,
+                                border_radius=8,
+                                clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                                content=ft.InteractiveViewer(
+                                    content=ft.Image(src=res['chart_b64'], fit="contain", width=750, height=220),
+                                    min_scale=0.8,
+                                    max_scale=3.5,
+                                    pan_enabled=True,
+                                    scale_enabled=True,
+                                    clip_behavior=ft.ClipBehavior.HARD_EDGE
+                                )
+                            )
                         ]
                     )
                 )
