@@ -278,6 +278,11 @@ class MobileTradingApp:
                     selected_icon=ft.Icons.ANALYTICS_ROUNDED,
                     label="백테스트"
                 ),
+                ft.NavigationBarDestination(
+                    icon=ft.Icons.SETTINGS_OUTLINED,
+                    selected_icon=ft.Icons.SETTINGS_ROUNDED,
+                    label="설정"
+                ),
             ],
             on_change=self.on_nav_change
         )
@@ -334,18 +339,19 @@ class MobileTradingApp:
                 self.page.update()
                 return
 
-        # 2. 메인 3대 탭 모드인 경우
+        # 2. 메인 탭 모드인 경우
         self._update_appbar_for_tabs()
 
         if self.current_tab_index == 0:
             self.page.floating_action_button = None
             self.content_container.content = self._build_home_tab()
         elif self.current_tab_index == 1:
-            # 계좌 현황 탭: 우측 하단 '+' 신규 계좌 등록 FAB 활성화
+            # 계좌 현황 탭: 우측 하단 단일 '+' 원형 FAB 활성화
             self.page.floating_action_button = ft.FloatingActionButton(
                 icon=ft.Icons.ADD,
+                shape=ft.CircleBorder(),
                 bgcolor=ACCENT_BLUE,
-                content=ft.Icon(ft.Icons.ADD, color=ft.Colors.BLACK, size=24),
+                foreground_color=ft.Colors.BLACK,
                 tooltip="새 계좌 추가",
                 on_click=self.open_add_account_dialog
             )
@@ -353,6 +359,9 @@ class MobileTradingApp:
         elif self.current_tab_index == 2:
             self.page.floating_action_button = None
             self.content_container.content = self._build_backtest_tab()
+        elif self.current_tab_index == 3:
+            self.page.floating_action_button = None
+            self.content_container.content = self._build_settings_tab()
 
         self.page.update()
 
@@ -369,6 +378,10 @@ class MobileTradingApp:
             self.title_text.value = "전략 백테스트"
             self.subtitle_text.value = "시뮬레이션 및 성과 검증"
             self.leading_icon.content = ft.Icon(ft.Icons.ANALYTICS_OUTLINED, color=ACCENT_BLUE, size=22)
+        elif self.current_tab_index == 3:
+            self.title_text.value = "환경 설정"
+            self.subtitle_text.value = "데이터 내보내기 및 시스템 설정"
+            self.leading_icon.content = ft.Icon(ft.Icons.SETTINGS_OUTLINED, color=ACCENT_BLUE, size=22)
 
         self.page.appbar.leading = self.leading_icon
         self.page.appbar.actions = [
@@ -1010,94 +1023,174 @@ class MobileTradingApp:
         sell_orders = dtl.get('sell_orders', [])
         buy_orders = dtl.get('buy_orders', [])
 
-        def handle_copy_detail_orders(e):
-            lines = [
-                f"[{name} 당일 주문표 - {target_date}]",
-                f"종목: {ticker} | 전략: {strat} ({mode} 모드)",
-                f"하루 배분 예산: ${budget:,.2f}",
-                "----------------------------------------"
-            ]
-            if sell_orders:
-                lines.append("■ LOC 매도 주문:")
-                for s in sell_orders:
-                    lines.append(f"  • {s.get('구분', '매도')}: {s.get('주문단가', '')} | {s.get('주문수량', '')} | {s.get('체결조건', '')}")
-            if buy_orders:
-                lines.append("■ LOC 매수 주문 (퉁치기 순매수):")
-                for b in buy_orders:
-                    lines.append(f"  • {b.get('호가단계', '매수')}: {b.get('주문단가', '')} | {b.get('주문수량', '')} | {b.get('체결조건', '')}")
-            lines.append("----------------------------------------")
-            copy_text = "\n".join(lines)
-            copy_text_to_clipboard(self.page, copy_text)
-            show_toast(self.page, "주문표가 클립보드에 복사되었습니다! 증권사 앱에 붙여넣기 하세요.")
+        # 3-1. 매도 주문 박스 (Rose 테두리 단일 박스)
+        sell_items = []
+        if sell_orders:
+            for i, s in enumerate(sell_orders):
+                title = s.get('구분', 'LOC 익절 매도')
+                price = s.get('주문단가', '$0.00')
+                qty = s.get('주문수량', '0주')
+                amt = s.get('예상금액', '$0.00')
+                cond = s.get('체결조건', '')
+                note = s.get('비고', '')
 
-        order_cards = []
-        for s in sell_orders:
-            order_cards.append(
+                row = ft.Container(
+                    padding=ft.Padding.symmetric(vertical=6),
+                    content=ft.Column(
+                        controls=[
+                            ft.Row(
+                                controls=[
+                                    ft.Text(title, size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                    ft.Text(f"{price} ({qty})", size=14, weight=ft.FontWeight.BOLD, color=LOSS_RED)
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            ),
+                            ft.Row(
+                                controls=[
+                                    ft.Text(f"예상금액: {amt}", size=11, color=TEXT_MUTED),
+                                    ft.Text(cond, size=11, color=LOSS_RED, weight=ft.FontWeight.W_500)
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            ),
+                            ft.Text(f"💡 {note}", size=10, color=TEXT_MUTED) if note else ft.Container()
+                        ],
+                        spacing=2
+                    )
+                )
+                sell_items.append(row)
+                if i < len(sell_orders) - 1:
+                    sell_items.append(ft.Divider(color=BORDER_COLOR, height=1))
+        else:
+            sell_items.append(
                 ft.Container(
-                    bgcolor=SURFACE_CARD,
-                    border=ft.Border.all(1, ft.Colors.with_opacity(0.4, LOSS_RED)),
-                    border_radius=8,
-                    padding=10,
+                    padding=ft.Padding.symmetric(vertical=8),
                     content=ft.Row(
                         controls=[
+                            ft.Icon(ft.Icons.CHECK, color=TEXT_MUTED, size=16),
+                            ft.Text("당일 체결 대상 매도 주문 없음 (보유분 홀딩)", size=12, color=TEXT_MUTED)
+                        ],
+                        spacing=6
+                    )
+                )
+            )
+
+        sell_box = ft.Container(
+            bgcolor=SURFACE_CARD,
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, LOSS_RED)),
+            border_radius=12,
+            padding=14,
+            content=ft.Column(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            ft.Row([
+                                ft.Icon(ft.Icons.ARROW_UPWARD, color=LOSS_RED, size=16),
+                                ft.Text("🔴 LOC 매도 주문 (전량 청산 / 익절)", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
+                            ], spacing=6),
                             ft.Container(
-                                content=ft.Text("매도", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
+                                content=ft.Text(f"{len(sell_orders)}건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.with_opacity(0.15, LOSS_RED),
                                 padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                 border_radius=4
-                            ),
-                            ft.Text(s.get('구분', 'LOC 매도'), size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY, expand=True),
-                            ft.Text(f"{s.get('주문단가', '')} ({s.get('주문수량', '')})", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
+                            )
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    ft.Divider(color=BORDER_COLOR, height=1),
+                    *sell_items
+                ],
+                spacing=6
+            )
+        )
+
+        # 3-2. 매수 주문 박스 (Emerald 테두리 단일 박스)
+        buy_items = []
+        if buy_orders:
+            for i, b in enumerate(buy_orders):
+                stage = b.get('호가단계', '순매수')
+                price = b.get('주문단가', '$0.00')
+                qty = b.get('주문수량', '0주')
+                amt = b.get('예상금액', '$0.00')
+                cond = b.get('체결조건', '')
+                note = b.get('비고', '')
+
+                row = ft.Container(
+                    padding=ft.Padding.symmetric(vertical=6),
+                    content=ft.Column(
+                        controls=[
+                            ft.Row(
+                                controls=[
+                                    ft.Text(stage, size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                    ft.Text(f"{price} ({qty})", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            ),
+                            ft.Row(
+                                controls=[
+                                    ft.Text(f"예상금액: {amt}", size=11, color=TEXT_MUTED),
+                                    ft.Text(cond, size=11, color=PROFIT_GREEN, weight=ft.FontWeight.W_500)
+                                ],
+                                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            ),
+                            ft.Text(f"💡 {note}", size=10, color=TEXT_MUTED) if note else ft.Container()
+                        ],
+                        spacing=2
+                    )
+                )
+                buy_items.append(row)
+                if i < len(buy_orders) - 1:
+                    buy_items.append(ft.Divider(color=BORDER_COLOR, height=1))
+        else:
+            buy_items.append(
+                ft.Container(
+                    padding=ft.Padding.symmetric(vertical=8),
+                    content=ft.Row(
+                        controls=[
+                            ft.Icon(ft.Icons.CHECK, color=TEXT_MUTED, size=16),
+                            ft.Text("당일 체결 대상 매수 주문 없음", size=12, color=TEXT_MUTED)
+                        ],
+                        spacing=6
                     )
                 )
             )
 
-        for b in buy_orders:
-            order_cards.append(
-                ft.Container(
-                    bgcolor=SURFACE_CARD,
-                    border=ft.Border.all(1, ft.Colors.with_opacity(0.3, PROFIT_GREEN)),
-                    border_radius=8,
-                    padding=10,
-                    content=ft.Row(
+        buy_box = ft.Container(
+            bgcolor=SURFACE_CARD,
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.35, PROFIT_GREEN)),
+            border_radius=12,
+            padding=14,
+            content=ft.Column(
+                controls=[
+                    ft.Row(
                         controls=[
+                            ft.Row([
+                                ft.Icon(ft.Icons.ARROW_DOWNWARD, color=PROFIT_GREEN, size=16),
+                                ft.Text("🟢 LOC 매수 주문 (1차 ~ 4차 분할 순매수)", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
+                            ], spacing=6),
                             ft.Container(
-                                content=ft.Text("매수", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
+                                content=ft.Text(f"{len(buy_orders)}건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.with_opacity(0.15, PROFIT_GREEN),
                                 padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                 border_radius=4
-                            ),
-                            ft.Text(b.get('호가단계', '순매수'), size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY, expand=True),
-                            ft.Text(f"{b.get('주문단가', '')} ({b.get('주문수량', '')})", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
+                            )
                         ],
                         alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                    )
-                )
+                    ),
+                    ft.Divider(color=BORDER_COLOR, height=1),
+                    *buy_items
+                ],
+                spacing=6
             )
+        )
 
         orders_section = ft.Column(
             controls=[
-                ft.Row(
-                    controls=[
-                        ft.Row([
-                            ft.Icon(ft.Icons.RECEIPT_LONG, color=ACCENT_BLUE, size=18),
-                            ft.Text(f"금일 매수·매도 주문표 ({target_date})", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
-                        ], spacing=6),
-                        ft.FilledButton(
-                            content=ft.Row([ft.Icon(ft.Icons.CONTENT_COPY, size=13), ft.Text("복사", size=11)], spacing=4),
-                            style=ft.ButtonStyle(
-                                bgcolor=ACCENT_BLUE,
-                                color=ft.Colors.BLACK,
-                                padding=ft.Padding.symmetric(horizontal=8, vertical=4)
-                            ),
-                            on_click=handle_copy_detail_orders
-                        )
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                ),
-                *order_cards
+                ft.Row([
+                    ft.Icon(ft.Icons.RECEIPT_LONG, color=ACCENT_BLUE, size=18),
+                    ft.Text(f"금일 매수·매도 주문표 ({target_date})", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                ], spacing=6),
+                sell_box,
+                buy_box
             ],
             spacing=8
         )
@@ -1536,6 +1629,231 @@ class MobileTradingApp:
             controls=[
                 input_card,
                 *results_widgets,
+                ft.Container(height=20)
+            ],
+            spacing=8,
+            expand=True
+        )
+
+    # =================================================================
+    # TAB 3: ⚙ 설정 (CSV 내보내기 & 시스템 환경 설정)
+    # =================================================================
+    def _build_settings_tab(self):
+        global EXCHANGE_RATE
+
+        exports_dir = os.path.join(CURRENT_DIR, "exports")
+        os.makedirs(exports_dir, exist_ok=True)
+
+        acc_options = []
+        for a in self.accounts:
+            acc_options.append(ft.dropdown.Option(key=a['id'], text=f"{a.get('name', '계좌')} ({a.get('ticker', '')})"))
+
+        selected_acc_id = self.accounts[0]['id'] if self.accounts else None
+
+        export_acc_dd = ft.Dropdown(
+            label="내보낼 계좌 선택",
+            value=selected_acc_id,
+            options=acc_options,
+            border_color=BORDER_COLOR,
+            focused_border_color=ACCENT_BLUE,
+            color=TEXT_PRIMARY,
+            expand=True
+        )
+
+        def handle_export_csv(e):
+            aid = export_acc_dd.value
+            if not aid:
+                show_toast(self.page, "내보낼 계좌를 선택해주세요.", is_error=True)
+                return
+
+            target = next((a for a in self.accounts if a['id'] == aid), None)
+            if not target:
+                show_toast(self.page, "계좌를 찾을 수 없습니다.", is_error=True)
+                return
+
+            acc_name = target.get('name', '계좌').replace(' ', '_')
+            now_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{acc_name}_매매일지_{now_str}.csv"
+            filepath = os.path.join(exports_dir, filename)
+
+            try:
+                ok = self.am.export_trade_records_csv(aid, filepath)
+                if ok:
+                    show_toast(self.page, f"'{filename}' 파일로 저장되었습니다!")
+                else:
+                    show_toast(self.page, "저장할 매매 일지 기록이 없습니다.", is_error=True)
+            except Exception as ex:
+                show_toast(self.page, f"CSV 내보내기 실패: {ex}", is_error=True)
+
+        def handle_open_folder(e):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(exports_dir)
+                else:
+                    subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", exports_dir])
+            except Exception as ex:
+                show_toast(self.page, f"폴더 열기 실패: {ex}", is_error=True)
+
+        # 1. CSV 내보내기 카드
+        export_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.FILE_DOWNLOAD_OUTLINED, color=ACCENT_BLUE, size=20),
+                                ft.Text("계좌 매매 내역 CSV 내보내기", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ],
+                            spacing=6
+                        ),
+                        ft.Text("선택한 계좌의 일일 매매 기록(체결가, 수량, 현금, 잔고, 실현손익)을 엑셀용 CSV 파일로 저장합니다.", size=11, color=TEXT_SECONDARY),
+                        ft.Container(height=4),
+                        export_acc_dd,
+                        ft.Container(height=4),
+                        ft.Row(
+                            controls=[
+                                ft.FilledButton(
+                                    content=ft.Row([ft.Icon(ft.Icons.DOWNLOAD, size=16), ft.Text("CSV 내보내기", size=13, weight=ft.FontWeight.BOLD)], spacing=6),
+                                    style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK, shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=11)),
+                                    expand=True,
+                                    on_click=handle_export_csv
+                                ),
+                                ft.OutlinedButton(
+                                    content=ft.Row([ft.Icon(ft.Icons.FOLDER_OPEN, size=16, color=TEXT_PRIMARY), ft.Text("저장 폴더 열기", size=12, color=TEXT_PRIMARY)], spacing=4),
+                                    style=ft.ButtonStyle(side=ft.BorderSide(1, BORDER_COLOR), shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=11)),
+                                    expand=True,
+                                    on_click=handle_open_folder
+                                )
+                            ],
+                            spacing=8
+                        )
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
+        # 2. 환율 설정 카드
+        rate_field = ft.TextField(
+            label="기준 환율 (1 USD = N 원)",
+            value=f"{EXCHANGE_RATE:.0f}",
+            keyboard_type=ft.KeyboardType.NUMBER,
+            border_color=BORDER_COLOR,
+            focused_border_color=ACCENT_BLUE,
+            color=TEXT_PRIMARY,
+            text_size=13,
+            content_padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+            expand=True
+        )
+
+        def handle_save_rate(e):
+            global EXCHANGE_RATE
+            try:
+                new_rate = float(rate_field.value.strip())
+                if new_rate > 0:
+                    EXCHANGE_RATE = new_rate
+                    show_toast(self.page, f"기준 환율이 {EXCHANGE_RATE:,.0f}원으로 변경되었습니다.")
+                    self.reload_data()
+            except Exception:
+                show_toast(self.page, "올바른 환율 숫자를 입력하세요.", is_error=True)
+
+        rate_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.CURRENCY_EXCHANGE, color=PROFIT_GREEN, size=20),
+                                ft.Text("기준 환율 설정", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ],
+                            spacing=6
+                        ),
+                        ft.Text("홈 화면 및 계좌 상세에서 달러 자산을 원화로 환산할 때 적용되는 기준 환율입니다.", size=11, color=TEXT_SECONDARY),
+                        ft.Container(height=4),
+                        ft.Row(
+                            controls=[
+                                rate_field,
+                                ft.FilledButton(
+                                    "적용",
+                                    style=ft.ButtonStyle(bgcolor=PROFIT_GREEN, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=8)),
+                                    on_click=handle_save_rate
+                                )
+                            ],
+                            spacing=8
+                        )
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
+        # 3. 추후 확장 예정 설정 안내 카드
+        future_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.AUTO_AWESOME, color=RESERVE_AMBER, size=20),
+                                ft.Text("향후 추가 예정 설정", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ],
+                            spacing=6
+                        ),
+                        ft.Text("다음 업데이트에서 다양한 개인화 및 자동화 설정이 제공될 예정입니다.", size=11, color=TEXT_SECONDARY),
+                        ft.Container(height=4),
+                        ft.Row([ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE_OUTLINED, size=16, color=TEXT_MUTED), ft.Text("미국 프리마켓 장전 목표가 도달 알림", size=12, color=TEXT_MUTED)], spacing=8),
+                        ft.Row([ft.Icon(ft.Icons.CLOUD_SYNC_OUTLINED, size=16, color=TEXT_MUTED), ft.Text("구글 드라이브 / 클라우드 계좌 백업 동기화", size=12, color=TEXT_MUTED)], spacing=8),
+                        ft.Row([ft.Icon(ft.Icons.API, size=16, color=TEXT_MUTED), ft.Text("증권사 Open API 연동 및 자동 주문 전송", size=12, color=TEXT_MUTED)], spacing=8),
+                        ft.Row([ft.Icon(ft.Icons.WIDGETS_OUTLINED, size=16, color=TEXT_MUTED), ft.Text("안드로이드 바탕화면 실시간 잔고 위젯", size=12, color=TEXT_MUTED)], spacing=8),
+                    ],
+                    spacing=6
+                )
+            )
+        )
+
+        # 4. 앱 정보 카드
+        app_info_card = ft.Container(
+            padding=14,
+            bgcolor=SURFACE_CARD,
+            border=ft.Border.all(1, BORDER_COLOR),
+            border_radius=12,
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=TEXT_MUTED),
+                    ft.Column(
+                        controls=[
+                            ft.Text("종종 투자 모바일 (JongJong Mobile) v1.0.0", size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                            ft.Text("엔진: Python 3.12 & Flutter (Flet 1.0.2) • 데이터: data/accounts.json", size=10, color=TEXT_MUTED),
+                        ],
+                        spacing=2,
+                        expand=True
+                    )
+                ],
+                spacing=10
+            )
+        )
+
+        return ft.ListView(
+            controls=[
+                export_card,
+                ft.Container(height=6),
+                rate_card,
+                ft.Container(height=6),
+                future_card,
+                ft.Container(height=6),
+                app_info_card,
                 ft.Container(height=20)
             ],
             spacing=8,
