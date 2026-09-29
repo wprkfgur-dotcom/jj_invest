@@ -192,7 +192,7 @@ def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float) ->
     전체 계좌의 통합 자산 추이 그래프를 고해상도로 생성하여 base64 URI로 반환합니다.
     (InteractiveViewer에서 부드럽게 좌우 이동 및 확대 가능)
     """
-    fig, ax = plt.subplots(figsize=(7.5, 2.8), facecolor=SURFACE_CARD)
+    fig, ax = plt.subplots(figsize=(6.5, 2.8), facecolor=SURFACE_CARD)
     ax.set_facecolor(SURFACE_CARD)
 
     all_series = []
@@ -224,7 +224,7 @@ def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float) ->
     fig.autofmt_xdate(rotation=20)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=140, facecolor=fig.get_facecolor())
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode('utf-8')
@@ -234,9 +234,9 @@ def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float) ->
 def render_backtest_chart(df_strat: pd.DataFrame, df_bnh: pd.DataFrame, strat_name: str, ticker: str) -> str:
     """
     백테스트 결과(전략 vs 단순보유) 자산 비교 차트를 고해상도로 생성하여 base64 URI로 반환합니다.
-    (InteractiveViewer에서 부드럽게 좌우 이동 및 확대 가능)
+    (초기에는 전체 추이가 한눈에 보이고, 손으로 핀치/줌 시 자유롭게 확대 및 좌우 이동 가능)
     """
-    fig, ax = plt.subplots(figsize=(7.5, 3.0), facecolor=SURFACE_CARD)
+    fig, ax = plt.subplots(figsize=(6.5, 2.8), facecolor=SURFACE_CARD)
     ax.set_facecolor(SURFACE_CARD)
 
     dates = pd.to_datetime(df_strat['Date'])
@@ -256,7 +256,7 @@ def render_backtest_chart(df_strat: pd.DataFrame, df_bnh: pd.DataFrame, strat_na
     fig.autofmt_xdate(rotation=20)
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', dpi=140, facecolor=fig.get_facecolor())
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode('utf-8')
@@ -286,7 +286,7 @@ class MobileTradingApp:
         self.page.padding = 0
 
         # 데스크톱 실행 시 안드로이드 폰 비율로 크기 고정
-        if hasattr(self.page, "window"):
+        if hasattr(self.page, "window") and self.page.window:
             self.page.window.width = 412
             self.page.window.height = 860
             self.page.window.resizable = True
@@ -593,7 +593,7 @@ class MobileTradingApp:
                                     ft.Icon(ft.Icons.SHOW_CHART, size=18, color=ACCENT_BLUE),
                                     ft.Text("포트폴리오 자산 성장 추이", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                                 ], spacing=6),
-                                ft.Text("드래그: 이동 | 핀치: 확대", size=10, color=TEXT_MUTED)
+                                ft.Text("핀치: 확대 | 드래그: 이동", size=10, color=TEXT_MUTED)
                             ],
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                         ),
@@ -603,9 +603,10 @@ class MobileTradingApp:
                             border_radius=8,
                             clip_behavior=ft.ClipBehavior.HARD_EDGE,
                             content=ft.InteractiveViewer(
-                                content=ft.Image(src=chart_base64, fit="contain", width=720, height=200),
-                                min_scale=0.8,
-                                max_scale=3.5,
+                                content=ft.Image(src=chart_base64, fit="contain"),
+                                constrained=True,
+                                min_scale=1.0,
+                                max_scale=4.0,
                                 pan_enabled=True,
                                 scale_enabled=True,
                                 clip_behavior=ft.ClipBehavior.HARD_EDGE
@@ -856,15 +857,6 @@ class MobileTradingApp:
                                     ft.Text(f"위기: {reserve_pct:.0f}% (${ak_val:,.0f})", size=11, color=RESERVE_AMBER),
                                 ],
                                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                            ),
-                            ft.Container(height=4),
-                            ft.Row(
-                                controls=[
-                                    ft.Text("👉 터치하여 상세 매입 정보 및 주문표 보기", size=11, color=ACCENT_BLUE),
-                                    ft.Icon(ft.Icons.ARROW_FORWARD, size=14, color=ACCENT_BLUE)
-                                ],
-                                alignment=ft.MainAxisAlignment.END,
-                                spacing=4
                             )
                         ],
                         spacing=3
@@ -1734,9 +1726,10 @@ class MobileTradingApp:
                                 border_radius=8,
                                 clip_behavior=ft.ClipBehavior.HARD_EDGE,
                                 content=ft.InteractiveViewer(
-                                    content=ft.Image(src=res['chart_b64'], fit="contain", width=750, height=220),
-                                    min_scale=0.8,
-                                    max_scale=3.5,
+                                    content=ft.Image(src=res['chart_b64'], fit="contain"),
+                                    constrained=True,
+                                    min_scale=1.0,
+                                    max_scale=4.0,
                                     pan_enabled=True,
                                     scale_enabled=True,
                                     clip_behavior=ft.ClipBehavior.HARD_EDGE
@@ -1808,7 +1801,8 @@ class MobileTradingApp:
     def _build_settings_tab(self):
         global EXCHANGE_RATE
 
-        exports_dir = os.path.join(CURRENT_DIR, "exports")
+        storage_base = os.environ.get("FLET_APP_STORAGE_DATA") or CURRENT_DIR
+        exports_dir = os.path.join(storage_base, "exports")
         os.makedirs(exports_dir, exist_ok=True)
 
         acc_options = []

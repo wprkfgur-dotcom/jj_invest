@@ -17,7 +17,10 @@ from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from gui.order_netting import calculate_order_netting, generate_jongjong_orders
 from core.market_calendar import get_next_trading_day, get_prev_trading_day, is_us_trading_day, parse_date
 
-if getattr(sys, 'frozen', False):
+if os.environ.get("FLET_APP_STORAGE_DATA"):
+    # Flet 모바일 (Android/iOS) 전용 영구 저장소 디렉터리
+    BASE_DIR = os.environ.get("FLET_APP_STORAGE_DATA")
+elif getattr(sys, 'frozen', False):
     # PyInstaller 실행 파일(.exe)이 위치한 실제 폴더 기준
     BASE_DIR = os.path.dirname(sys.executable)
 else:
