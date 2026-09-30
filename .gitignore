@@ -25,6 +25,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 *.exe
+*.apk
+*.aab
 *.spec
 
 # Virtual Environments
@@ -52,7 +54,8 @@ htmlcov/
 *.log
 
 # Sensitive Account Data
-data/accounts.json
+**/accounts.json
 data/test_*.json
 data/*.csv
+scratch/
 scratch/test_*.csv

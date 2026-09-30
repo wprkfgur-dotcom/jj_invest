@@ -374,7 +374,7 @@ class AccountManager:
         return acc
 
     def record_daily_close(self, acc_id: str, close_price: float, buy_qty: int = 0, buy_price: float = None,
-                           sell_qty: int = 0, sell_price: float = None, memo: str = "", trade_date: str = None) -> dict:
+                           sell_qty: int = 0, sell_price: float = None, memo: str = "") -> dict:
         """
         미국 주식 시장 마감 후 당일 종가와 실제 체결 수량을 기록하고 계좌 잔고 및 일지를 갱신합니다.
         """
@@ -384,7 +384,7 @@ class AccountManager:
             return None
 
         records = acc.setdefault('trade_records', [])
-        curr_d_str = trade_date.strip() if (trade_date and str(trade_date).strip()) else acc.get('current_date')
+        curr_d_str = acc.get('current_date')
         if not curr_d_str:
             curr_d_str = records[-1]['Date'] if records else acc.get('start_date', '2026-01-02')
 
@@ -517,7 +517,6 @@ class AccountManager:
         else:
             records.append(new_entry)
 
-        acc['current_date'] = curr_d_str
         acc['operational_state'] = 'DAY_COMPLETED'  # 장 마감 정산 완료 상태
         self.save_accounts(accounts)
         return acc
