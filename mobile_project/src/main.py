@@ -3255,14 +3255,22 @@ class MobileTradingApp:
             u = cfg.get("web_app_url", "")
             t = cfg.get("last_sync_time") or "기록 없음"
             m = cfg.get("last_sync_message") or ""
+            is_active = bool(en and u)
             sync_status_text.value = (
-                f"• 상태: {'실시간 자동 동기화 가동 중 (Sync ON)' if (en and u) else '동기화 꺼짐 (Sync OFF - 로컬 기기 보관)'}\n"
+                f"• 상태: {'실시간 자동 동기화 가동 중 (Sync ON)' if is_active else '동기화 꺼짐 (Sync OFF - 로컬 기기 보관)'}\n"
                 f"• 최근 동기화: {t} ({m})\n"
                 f"• 드라이브 폴더: Google Drive / JongJongTrader / accounts.json"
             )
-            sync_status_text.color = PROFIT_GREEN if (en and u) else TEXT_MUTED
+            sync_status_text.color = PROFIT_GREEN if is_active else TEXT_MUTED
+            sync_badge.content = ft.Text("Sync ON" if is_active else "Sync OFF", color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD)
+            sync_badge.bgcolor = PROFIT_GREEN if is_active else LOSS_RED
+            sync_control_box.border = ft.Border.all(1, PROFIT_GREEN if is_active else BORDER_COLOR)
+            sync_switch.value = is_active
             try:
                 sync_status_text.update()
+                sync_badge.update()
+                sync_control_box.update()
+                sync_switch.update()
             except Exception:
                 pass
 
@@ -3298,12 +3306,36 @@ class MobileTradingApp:
             else:
                 show_toast(self.page, "Google Drive 동기화가 비활성화되었습니다. (로컬 단독 저장)")
 
+        sync_badge = ft.Container(
+            content=ft.Text("Sync ON" if is_enabled else "Sync OFF", color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+            bgcolor=PROFIT_GREEN if is_enabled else LOSS_RED,
+            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+            border_radius=6
+        )
+
         sync_switch = ft.Switch(
-            label="Google Drive 실시간 동기화",
-            label_position=ft.LabelPosition.LEFT,
             value=is_enabled,
-            active_color=ACCENT_BLUE,
+            active_color=PROFIT_GREEN,
+            inactive_thumb_color=ft.Colors.GREY_500,
             on_change=on_sync_switch_change
+        )
+
+        sync_control_box = ft.Container(
+            bgcolor=SURFACE_CONTAINER,
+            border=ft.Border.all(1, PROFIT_GREEN if is_enabled else BORDER_COLOR),
+            border_radius=10,
+            padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+            content=ft.Row(
+                controls=[
+                    ft.Row([
+                        ft.Icon(ft.Icons.POWER_SETTINGS_NEW, size=18, color=PROFIT_GREEN if is_enabled else TEXT_MUTED),
+                        ft.Text("실시간 동기화 상태:", size=12.5, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                        sync_badge
+                    ], spacing=6),
+                    sync_switch
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+            )
         )
 
         def handle_save_url(e):
@@ -3469,19 +3501,18 @@ class MobileTradingApp:
                     controls=[
                         ft.Row(
                             controls=[
-                                ft.Row([
-                                    ft.Icon(ft.Icons.CLOUD_SYNC_ROUNDED, color=ACCENT_BLUE, size=20),
-                                    ft.Text("Google Drive 클라우드 동기화 (Sync)", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                ], spacing=6),
-                                sync_switch
+                                ft.Icon(ft.Icons.CLOUD_SYNC_ROUNDED, color=ACCENT_BLUE, size=20),
+                                ft.Text("Google Drive 클라우드 실시간 동기화", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                             ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                            spacing=6
                         ),
                         ft.Text(
                             "폰과 태블릿 등 여러 기기에서 동일한 구글 드라이브 폴더('JongJongTrader')를 통해 계좌 내역을 실시간으로 자동 동기화합니다.",
                             size=11,
                             color=TEXT_SECONDARY
                         ),
+                        ft.Container(height=2),
+                        sync_control_box,
                         ft.Container(height=2),
                         ft.Row(
                             controls=[
