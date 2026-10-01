@@ -1922,7 +1922,7 @@ class MobileTradingApp:
         )
 
         close_field = ft.TextField(
-            label="당일종가($)",
+            label="종가($)",
             label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
             value=f"{init_close:.2f}",
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -1931,12 +1931,13 @@ class MobileTradingApp:
             color=TEXT_PRIMARY,
             text_size=12,
             text_align=ft.TextAlign.RIGHT,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            dense=True,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=8),
             expand=True
         )
 
         buy_qty_field = ft.TextField(
-            label="체결매수(주)",
+            label="매수(주)",
             label_style=ft.TextStyle(size=11, color=PROFIT_GREEN),
             value=str(calc_buy_q),
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -1945,24 +1946,25 @@ class MobileTradingApp:
             color=TEXT_PRIMARY,
             text_size=12,
             text_align=ft.TextAlign.RIGHT,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            dense=True,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=8),
             expand=True
         )
 
         sell_qty_field = ft.TextField(
-            label="체결매도(자동)",
+            label="매도(자동)",
             label_style=ft.TextStyle(size=11, color=LOSS_RED),
             value=str(calc_sell_q),
             keyboard_type=ft.KeyboardType.NUMBER,
             border_color=BORDER_COLOR,
             focused_border_color=LOSS_RED,
-            color=TEXT_PRIMARY,
+            color=LOSS_RED,
             text_size=12,
             text_align=ft.TextAlign.RIGHT,
-            content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            dense=True,
+            content_padding=ft.Padding.symmetric(horizontal=8, vertical=8),
             expand=True,
-            read_only=True,
-            prefix_icon=ft.Icons.LOCK_ROUNDED
+            read_only=True
         )
 
         def on_settle_date_picked(new_date_str):
