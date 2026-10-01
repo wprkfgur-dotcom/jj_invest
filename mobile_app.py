@@ -3221,13 +3221,7 @@ class MobileTradingApp:
         )
 
         # 3. 버그 리포트 (Bug Report) 카드
-        def handle_bug_report(e):
-            mailto_url = make_bug_report_mailto()
-            try:
-                self.page.launch_url(mailto_url)
-                show_toast(self.page, "메일 작성 화면으로 이동합니다.")
-            except Exception as ex:
-                show_toast(self.page, f"메일 앱 실행 실패: {ex}", is_error=True)
+        mailto_url = make_bug_report_mailto()
 
         bug_report_card = ft.Card(
             bgcolor=SURFACE_CARD,
@@ -3246,7 +3240,7 @@ class MobileTradingApp:
                         ),
                         ft.Text(
                             "앱 사용 중 오류가 발생했거나 개선 사항이 있으시면 언제든 메일을 보내주세요.\n"
-                            "수신인(wprkfgur@hotmail.com)과 리포트 양식이 자동으로 채워집니다.",
+                            "버튼을 누르면 스마트폰 메일 앱이 열리며 수신인과 양식이 자동 입력됩니다.",
                             size=11,
                             color=TEXT_SECONDARY
                         ),
@@ -3263,7 +3257,17 @@ class MobileTradingApp:
                                 padding=ft.Padding.symmetric(vertical=12)
                             ),
                             width=380,
-                            on_click=handle_bug_report
+                            url=mailto_url,
+                            on_click=lambda _: show_toast(self.page, "메일 작성 화면으로 이동합니다.")
+                        ),
+                        ft.Container(
+                            padding=ft.Padding.symmetric(vertical=2, horizontal=4),
+                            content=ft.Text(
+                                "• 직접 전송 시 수신인: wprkfgur@hotmail.com (길게 눌러 복사 가능)",
+                                size=11,
+                                color=TEXT_MUTED,
+                                selectable=True
+                            )
                         )
                     ],
                     spacing=8
