@@ -34,7 +34,7 @@ if CURRENT_DIR not in sys.path:
 import flet as ft
 
 from gui.account_manager import AccountManager
-from core.data import fetch_market_data
+from core.data import fetch_market_data, get_price_from_db, get_db_date_range
 from core.metrics import calculate_metrics
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
@@ -126,11 +126,41 @@ def get_current_stock_price(ticker: str, fallback_price: float = 0.0) -> float:
 _HISTORICAL_PRICE_CACHE = {}
 
 
+def make_bug_report_mailto() -> str:
+    """
+    버그 리포트 전송을 위한 mailto URL을 생성합니다.
+    수신인: wprkfgur@hotmail.com
+    발신인: 기기 기본 이메일 계정
+    본문: 발생 상황과 증상을 작성할 수 있는 템플릿 미리 완성
+    """
+    import urllib.parse
+    recipient = "wprkfgur@hotmail.com"
+    subject = "[종종이 투자앱] 버그 리포트 및 피드백"
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+    body = f"""[버그 리포트 / 문의 사항]
+
+1. 발생 일시: {now_str}
+2. 발생 화면 / 기능: (예: 계좌 상세 일일 정산 / 백테스트 / 계좌 생성 등)
+3. 대상 종목 및 계좌명: 
+4. 문제 상황 및 구체적인 증상:
+(어떤 동작을 했을 때 어떤 오류나 이상 현상이 발생했는지 자유롭게 적어주세요)
+
+------------------------------------
+* 소중한 의견 감사합니다. 확인 후 신속히 반영하겠습니다."""
+
+    query = urllib.parse.urlencode({
+        'subject': subject,
+        'body': body
+    }, quote_via=urllib.parse.quote)
+    return f"mailto:{recipient}?{query}"
+
+
 def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: float = 0.0) -> float:
     """
     지정한 종목의 특정 정산 대상 날짜(target_date) 종가를 조회합니다.
+    - 로컬 SQLite DB에 저장된 시세가 있으면 네트워크 호출 없이 0.001초 만에 즉시 반환합니다.
     - 오늘 또는 미래 날짜인 경우: 실시간 현재가(fast_info)를 조회합니다.
-    - 과거 날짜인 경우: 해당 날짜의 일봉 종가를 조회하여 반환합니다.
+    - 과거 날짜인데 DB에 없는 경우: 증분 캐싱 후 반환합니다.
     - 조회 실패 시 fallback_price를 반환합니다.
     """
     if not target_date:
@@ -142,12 +172,22 @@ def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: floa
         return _HISTORICAL_PRICE_CACHE[cache_key]
 
     today_str = datetime.now().strftime('%Y-%m-%d')
+
+    # 1. 과거 날짜인 경우 로컬 SQLite DB 우선 조회 (초고속 0.001s)
+    if target_clean < today_str:
+        db_p = get_price_from_db(ticker, target_clean)
+        if db_p > 0:
+            _HISTORICAL_PRICE_CACHE[cache_key] = db_p
+            return db_p
+
+    # 2. 오늘 또는 미래 날짜인 경우 실시간 빠른 시세 조회
     if target_clean >= today_str:
         p = get_current_stock_price(ticker, fallback_price)
         if p > 0:
             _HISTORICAL_PRICE_CACHE[cache_key] = p
             return p
 
+    # 3. DB에 누락된 과거 구간인 경우 증분 다운로드 및 로컬 캐싱
     try:
         dt = datetime.strptime(target_clean, '%Y-%m-%d')
         s_date = (dt - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -3180,7 +3220,123 @@ class MobileTradingApp:
             )
         )
 
-        # 3. 추후 확장 예정 설정 안내 카드
+        # 3. 버그 리포트 (Bug Report) 카드
+        def handle_bug_report(e):
+            mailto_url = make_bug_report_mailto()
+            try:
+                self.page.launch_url(mailto_url)
+                show_toast(self.page, "메일 작성 화면으로 이동합니다.")
+            except Exception as ex:
+                show_toast(self.page, f"메일 앱 실행 실패: {ex}", is_error=True)
+
+        bug_report_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.BUG_REPORT_OUTLINED, color=LOSS_RED, size=20),
+                                ft.Text("버그 리포트 & 피드백 (Bug Report)", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ],
+                            spacing=6
+                        ),
+                        ft.Text(
+                            "앱 사용 중 오류가 발생했거나 개선 사항이 있으시면 언제든 메일을 보내주세요.\n"
+                            "수신인(wprkfgur@hotmail.com)과 리포트 양식이 자동으로 채워집니다.",
+                            size=11,
+                            color=TEXT_SECONDARY
+                        ),
+                        ft.Container(height=4),
+                        ft.FilledButton(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.EMAIL_OUTLINED, size=16),
+                                ft.Text("Bug Report 메일 작성하기", size=13, weight=ft.FontWeight.BOLD)
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+                            style=ft.ButtonStyle(
+                                bgcolor=LOSS_RED,
+                                color=ft.Colors.WHITE,
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding.symmetric(vertical=12)
+                            ),
+                            width=380,
+                            on_click=handle_bug_report
+                        )
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
+        # 4. 로컬 시세 DB 캐시 상태 및 동기화 카드
+        soxl_min, soxl_max = get_db_date_range('SOXL')
+        tqqq_min, tqqq_max = get_db_date_range('TQQQ')
+        soxl_status = f"{soxl_min} ~ {soxl_max}" if soxl_min else "미구축"
+        tqqq_status = f"{tqqq_min} ~ {tqqq_max}" if tqqq_min else "미구축"
+
+        db_sync_loading = ft.ProgressBar(visible=False, color=ACCENT_BLUE)
+        db_status_text = ft.Text(f"• SOXL: {soxl_status}\n• TQQQ: {tqqq_status}", size=11, color=TEXT_MUTED)
+
+        def handle_sync_market_db(e):
+            db_sync_loading.visible = True
+            db_sync_loading.update()
+            try:
+                today_s = datetime.now().strftime('%Y-%m-%d')
+                fetch_market_data('SOXL', '2019-01-01', today_s)
+                fetch_market_data('TQQQ', '2019-01-01', today_s)
+                s_min, s_max = get_db_date_range('SOXL')
+                t_min, t_max = get_db_date_range('TQQQ')
+                db_status_text.value = f"• SOXL: {s_min} ~ {s_max}\n• TQQQ: {t_min} ~ {t_max}"
+                db_status_text.update()
+                show_toast(self.page, "SOXL, TQQQ 로컬 시세 DB가 최신으로 동기화되었습니다!")
+            except Exception as ex:
+                show_toast(self.page, f"시세 DB 동기화 실패: {ex}", is_error=True)
+            finally:
+                db_sync_loading.visible = False
+                db_sync_loading.update()
+
+        cache_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.STORAGE_ROUNDED, color=ACCENT_BLUE, size=20),
+                                ft.Text("로컬 시세 DB 캐시 (초고속 로딩)", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ],
+                            spacing=6
+                        ),
+                        ft.Text("SOXL, TQQQ 시세를 내부 DB에 영구 보존하여 백테스트와 계좌 조회를 네트워크 지연 없이 0.01초 만에 실행합니다.", size=11, color=TEXT_SECONDARY),
+                        db_status_text,
+                        db_sync_loading,
+                        ft.Container(height=2),
+                        ft.OutlinedButton(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.SYNC, size=15, color=ACCENT_BLUE),
+                                ft.Text("최신 시세 수동 동기화", size=12, color=ACCENT_BLUE)
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+                            style=ft.ButtonStyle(
+                                side=ft.BorderSide(1, ACCENT_BLUE),
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding.symmetric(vertical=10)
+                            ),
+                            width=380,
+                            on_click=handle_sync_market_db
+                        )
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
+        # 5. 추후 확장 예정 설정 안내 카드
         future_card = ft.Card(
             bgcolor=SURFACE_CARD,
             elevation=2,
@@ -3208,7 +3364,7 @@ class MobileTradingApp:
             )
         )
 
-        # 4. 앱 정보 및 개발자 크레딧 카드
+        # 6. 앱 정보 및 개발자 크레딧 카드
         app_info_card = ft.Container(
             padding=16,
             bgcolor=SURFACE_CARD,
@@ -3231,7 +3387,7 @@ class MobileTradingApp:
                         ],
                         spacing=8
                     ),
-                    ft.Text("엔진: Python 3.12 & Flutter (Flet 1.0.2) • 데이터: data/accounts.json", size=10, color=TEXT_MUTED),
+                    ft.Text("엔진: Python 3.12 & Flutter (Flet 1.0.2) • 데이터: data/accounts.json, data/market_data.db", size=10, color=TEXT_MUTED),
                 ],
                 spacing=8
             )
@@ -3242,6 +3398,10 @@ class MobileTradingApp:
                 export_card,
                 ft.Container(height=6),
                 rate_card,
+                ft.Container(height=6),
+                cache_card,
+                ft.Container(height=6),
+                bug_report_card,
                 ft.Container(height=6),
                 future_card,
                 ft.Container(height=6),
