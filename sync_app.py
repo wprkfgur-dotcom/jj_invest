@@ -64,13 +64,18 @@ for folder in ["core", "gui", "strategies"]:
     for d in dest_dirs:
         os.makedirs(d, exist_ok=True)
 
-    for item in os.listdir(src_folder):
-        s_item = os.path.join(src_folder, item)
-        if os.path.isfile(s_item) and item.endswith(".py"):
-            for d in dest_dirs:
-                dest_file = os.path.join(d, item)
-                shutil.copy2(s_item, dest_file)
-            print(f"   Synced {folder}/{item} (Pure Python source)")
+    for root, dirs, files in os.walk(src_folder):
+        rel_dir = os.path.relpath(root, src_folder)
+        for f in files:
+            if f.endswith(".py"):
+                s_item = os.path.join(root, f)
+                for d in dest_dirs:
+                    target_dir = d if rel_dir == "." else os.path.join(d, rel_dir)
+                    os.makedirs(target_dir, exist_ok=True)
+                    dest_file = os.path.join(target_dir, f)
+                    shutil.copy2(s_item, dest_file)
+                display_path = f"{folder}/{f}" if rel_dir == "." else f"{folder}/{rel_dir}/{f}"
+                print(f"   Synced {display_path} (Pure Python source)")
 
 # 4. Copy data files
 data_src = os.path.join(BASE_DIR, "data")

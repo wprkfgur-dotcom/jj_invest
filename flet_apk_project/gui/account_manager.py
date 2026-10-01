@@ -55,9 +55,15 @@ class AccountManager:
             print(f"계좌 파일 로드 중 오류: {e}")
             return []
 
-    def save_accounts(self, accounts: list):
+    def save_accounts(self, accounts: list, skip_cloud_sync: bool = False):
         with open(self.filepath, 'w', encoding='utf-8') as f:
             json.dump(accounts, f, ensure_ascii=False, indent=2)
+        if not skip_cloud_sync:
+            try:
+                from core.cloud_sync import trigger_async_upload
+                trigger_async_upload(accounts)
+            except Exception:
+                pass
 
     def add_account(self, name: str, strategy: str, ticker: str, start_date: str, initial_seed: float, memo: str = "",
                     trade_records: list = None, adjustments: list = None, current_date: str = None, operational_state: str = None,

@@ -55,7 +55,10 @@ htmlcov/
 
 # Sensitive Account Data
 **/accounts.json
+**/accounts.backup.json
+data/cloud_sync_config.json
 data/test_*.json
 data/*.csv
 scratch/
 scratch/test_*.csv
+

@@ -39,6 +39,11 @@ from core.metrics import calculate_metrics
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from strategies.buy_and_hold import BuyAndHoldStrategy
+from core.cloud_sync import (
+    get_sync_config, save_sync_config, is_sync_enabled,
+    test_connection, upload_accounts_to_drive, download_accounts_from_drive,
+    sync_local_with_drive, get_gas_script_code
+)
 
 
 # =====================================================================
@@ -662,6 +667,18 @@ class MobileTradingApp:
         # 데이터 로드
         self.reload_data()
 
+        # 구글 드라이브 실시간 동기화가 켜져 있는 경우 백그라운드에서 최신 계좌 자동 확인
+        if is_sync_enabled():
+            import threading
+            def _startup_sync():
+                try:
+                    ok, msg = sync_local_with_drive(self.am)
+                    if ok:
+                        self.reload_data()
+                except Exception:
+                    pass
+            threading.Thread(target=_startup_sync, daemon=True).start()
+
     def open_date_picker_for_field(self, target_field: ft.TextField, on_change_callback=None):
         """달력 모달을 띄워 날짜(YYYY-MM-DD)를 선택할 수 있게 합니다."""
         cur_val = datetime.now()
@@ -905,12 +922,34 @@ class MobileTradingApp:
 
         self.action_buttons = [
             ft.IconButton(
+                icon=ft.Icons.CLOUD_SYNC_ROUNDED,
+                icon_color=ACCENT_BLUE,
+                tooltip="구글 드라이브 동기화",
+                on_click=lambda e: self.handle_quick_cloud_sync()
+            ),
+            ft.IconButton(
                 icon=ft.Icons.REFRESH_ROUNDED,
                 icon_color=TEXT_SECONDARY,
                 tooltip="새로고침",
                 on_click=lambda e: self.reload_data(show_message=True)
             )
         ]
+
+    def handle_quick_cloud_sync(self):
+        """상단 앱바 클라우드 아이콘 터치 시 구글 드라이브 동기화를 실행합니다."""
+        if not is_sync_enabled():
+            show_toast(self.page, "설정 탭에서 Google Drive 동기화를 켜주세요.")
+            return
+        show_toast(self.page, "Google Drive와 동기화 진행 중...")
+        import threading
+        def _bg_sync():
+            ok, msg = sync_local_with_drive(self.am)
+            if ok:
+                show_toast(self.page, msg)
+                self.reload_data()
+            else:
+                show_toast(self.page, f"동기화 실패: {msg}", is_error=True)
+        threading.Thread(target=_bg_sync, daemon=True).start()
 
         self.page.appbar = ft.AppBar(
             leading=self.leading_icon,
@@ -3164,7 +3203,335 @@ class MobileTradingApp:
             )
         )
 
-        # 2. 환율 설정 카드
+        # 2. Google Drive 클라우드 실시간 동기화 (Multi-Device Sync) 카드
+        sync_cfg = get_sync_config()
+        is_enabled = sync_cfg.get("sync_enabled", False)
+        curr_url = sync_cfg.get("web_app_url", "")
+        last_t = sync_cfg.get("last_sync_time") or "기록 없음"
+        last_m = sync_cfg.get("last_sync_message") or ""
+
+        sync_url_field = ft.TextField(
+            label="Google Apps Script 웹 앱 URL",
+            label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
+            value=curr_url,
+            hint_text="https://script.google.com/macros/s/.../exec",
+            border_color=BORDER_COLOR,
+            focused_border_color=ACCENT_BLUE,
+            color=TEXT_PRIMARY,
+            text_size=11.5,
+            dense=True,
+            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            expand=True
+        )
+
+        sync_status_text = ft.Text(
+            f"• 상태: {'실시간 자동 동기화 가동 중 (Sync ON)' if (is_enabled and curr_url) else '동기화 꺼짐 (Sync OFF - 로컬 기기 보관)'}\n"
+            f"• 최근 동기화: {last_t} ({last_m})\n"
+            f"• 드라이브 폴더: Google Drive / JongJongTrader / accounts.json",
+            size=11,
+            color=PROFIT_GREEN if (is_enabled and curr_url) else TEXT_MUTED
+        )
+
+        sync_loading = ft.ProgressBar(visible=False, color=ACCENT_BLUE)
+
+        def update_sync_status_ui():
+            cfg = get_sync_config()
+            en = cfg.get("sync_enabled", False)
+            u = cfg.get("web_app_url", "")
+            t = cfg.get("last_sync_time") or "기록 없음"
+            m = cfg.get("last_sync_message") or ""
+            sync_status_text.value = (
+                f"• 상태: {'실시간 자동 동기화 가동 중 (Sync ON)' if (en and u) else '동기화 꺼짐 (Sync OFF - 로컬 기기 보관)'}\n"
+                f"• 최근 동기화: {t} ({m})\n"
+                f"• 드라이브 폴더: Google Drive / JongJongTrader / accounts.json"
+            )
+            sync_status_text.color = PROFIT_GREEN if (en and u) else TEXT_MUTED
+            try:
+                sync_status_text.update()
+            except Exception:
+                pass
+
+        def on_sync_switch_change(e):
+            val = e.control.value
+            cfg = get_sync_config()
+            u = sync_url_field.value.strip()
+            if val and (not u or not u.startswith("http")):
+                e.control.value = False
+                e.control.update()
+                show_toast(self.page, "Google Apps Script 웹 앱 URL을 먼저 입력해주세요.", is_error=True)
+                return
+            cfg["sync_enabled"] = val
+            cfg["web_app_url"] = u
+            save_sync_config(cfg)
+            update_sync_status_ui()
+            if val:
+                show_toast(self.page, "Google Drive 실시간 동기화가 활성화되었습니다!")
+                import threading
+                def _initial_sync():
+                    sync_loading.visible = True
+                    sync_loading.update()
+                    ok, msg = sync_local_with_drive(self.am)
+                    sync_loading.visible = False
+                    sync_loading.update()
+                    update_sync_status_ui()
+                    if ok:
+                        show_toast(self.page, msg)
+                        self.reload_data()
+                    else:
+                        show_toast(self.page, f"동기화 오류: {msg}", is_error=True)
+                threading.Thread(target=_initial_sync, daemon=True).start()
+            else:
+                show_toast(self.page, "Google Drive 동기화가 비활성화되었습니다. (로컬 단독 저장)")
+
+        sync_switch = ft.Switch(
+            label="Google Drive 실시간 동기화",
+            label_position=ft.LabelPosition.LEFT,
+            value=is_enabled,
+            active_color=ACCENT_BLUE,
+            on_change=on_sync_switch_change
+        )
+
+        def handle_save_url(e):
+            u = sync_url_field.value.strip()
+            if not u or not u.startswith("http"):
+                show_toast(self.page, "올바른 URL을 입력하세요 (https://...)", is_error=True)
+                return
+            cfg = get_sync_config()
+            cfg["web_app_url"] = u
+            save_sync_config(cfg)
+            show_toast(self.page, "Google Apps Script URL이 저장되었습니다.")
+            update_sync_status_ui()
+
+        def handle_test_conn(e):
+            u = sync_url_field.value.strip()
+            if not u or not u.startswith("http"):
+                show_toast(self.page, "Google Apps Script URL을 입력하세요.", is_error=True)
+                return
+            sync_loading.visible = True
+            sync_loading.update()
+            import threading
+            def _bg():
+                ok, msg = test_connection(u)
+                sync_loading.visible = False
+                sync_loading.update()
+                if ok:
+                    show_toast(self.page, msg)
+                else:
+                    show_toast(self.page, f"연결 실패: {msg}", is_error=True)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def handle_sync_now(e):
+            if not is_sync_enabled():
+                show_toast(self.page, "Google Drive 동기화 스위치를 먼저 켜주세요.", is_error=True)
+                return
+            sync_loading.visible = True
+            sync_loading.update()
+            import threading
+            def _bg():
+                ok, msg = sync_local_with_drive(self.am)
+                sync_loading.visible = False
+                sync_loading.update()
+                update_sync_status_ui()
+                if ok:
+                    show_toast(self.page, msg)
+                    self.reload_data()
+                else:
+                    show_toast(self.page, f"동기화 실패: {msg}", is_error=True)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def handle_force_upload(e):
+            u = sync_url_field.value.strip()
+            if not u or not u.startswith("http"):
+                show_toast(self.page, "웹 앱 URL을 먼저 입력해주세요.", is_error=True)
+                return
+            sync_loading.visible = True
+            sync_loading.update()
+            import threading
+            def _bg():
+                accs = self.am.load_accounts()
+                ok, msg = upload_accounts_to_drive(accs, u)
+                sync_loading.visible = False
+                sync_loading.update()
+                update_sync_status_ui()
+                if ok:
+                    show_toast(self.page, f"구글 드라이브로 계좌 백업 업로드 완료 ({len(accs)}개 계좌)")
+                else:
+                    show_toast(self.page, f"업로드 실패: {msg}", is_error=True)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def handle_force_download(e):
+            u = sync_url_field.value.strip()
+            if not u or not u.startswith("http"):
+                show_toast(self.page, "웹 앱 URL을 먼저 입력해주세요.", is_error=True)
+                return
+            sync_loading.visible = True
+            sync_loading.update()
+            import threading
+            def _bg():
+                ok, drive_accs, msg = download_accounts_from_drive(u)
+                sync_loading.visible = False
+                sync_loading.update()
+                update_sync_status_ui()
+                if ok and drive_accs is not None:
+                    try:
+                        if os.path.exists(self.am.filepath):
+                            with open(self.am.filepath, 'r', encoding='utf-8') as rf:
+                                with open(os.path.join(DATA_DIR, "accounts.backup.json"), 'w', encoding='utf-8') as wf:
+                                    wf.write(rf.read())
+                    except Exception:
+                        pass
+                    self.am.save_accounts(drive_accs, skip_cloud_sync=True)
+                    show_toast(self.page, f"구글 드라이브에서 {len(drive_accs)}개 계좌를 복원했습니다!")
+                    self.reload_data()
+                else:
+                    show_toast(self.page, f"다운로드 실패: {msg}", is_error=True)
+            threading.Thread(target=_bg, daemon=True).start()
+
+        def open_gas_guide_dialog(e):
+            script_code = get_gas_script_code()
+            guide_dlg = ft.AlertDialog(
+                modal=True,
+                title=ft.Row([
+                    ft.Icon(ft.Icons.CLOUD_DONE, color=ACCENT_BLUE, size=20),
+                    ft.Text("Google Drive 1분 연동 가이드", size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                ], spacing=8),
+                content=ft.Container(
+                    width=380,
+                    content=ft.Column(
+                        controls=[
+                            ft.Text(
+                                "내 개인 Google Drive에 스크립트를 배포하여 폰과 태블릿 간 실시간 동기화를 구축하는 초간단 방법입니다:\n",
+                                size=11, color=TEXT_SECONDARY
+                            ),
+                            ft.Container(
+                                padding=12,
+                                bgcolor=SURFACE_CONTAINER,
+                                border_radius=8,
+                                content=ft.Column(
+                                    controls=[
+                                        ft.Text("1. 브라우저로 drive.google.com 접속", size=11.5, color=TEXT_PRIMARY),
+                                        ft.Text("2. '+ 새로 만들기' -> '더보기' -> 'Google Apps Script' 클릭", size=11.5, color=TEXT_PRIMARY),
+                                        ft.Text("3. 기존 내용을 지우고 아래 버튼으로 복사한 코드 전체 붙여넣기", size=11.5, color=TEXT_PRIMARY),
+                                        ft.Text("4. 우측 상단 파란색 [배포] -> [새 배포] 클릭", size=11.5, color=TEXT_PRIMARY),
+                                        ft.Text("   • 유형: [웹 앱(Web App)] 선택", size=11, color=ACCENT_BLUE),
+                                        ft.Text("   • 실행 권한: '나(내 이메일)'", size=11, color=TEXT_PRIMARY),
+                                        ft.Text("   • 액세스 권한: '모든 사용자(Anyone)' 선택 (필수!)", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
+                                        ft.Text("5. [배포] 클릭 후 발급된 '웹 앱 URL' 복사 -> 앱에 붙여넣기 끝!", size=11.5, color=TEXT_PRIMARY),
+                                    ],
+                                    spacing=5
+                                )
+                            ),
+                            ft.Container(height=6),
+                            ft.FilledButton(
+                                content=ft.Row([
+                                    ft.Icon(ft.Icons.CONTENT_COPY, size=15),
+                                    ft.Text("구글 스크립트 코드 전체 클립보드 복사", size=12, weight=ft.FontWeight.BOLD)
+                                ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+                                style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK, shape=ft.RoundedRectangleBorder(radius=8)),
+                                width=380,
+                                on_click=lambda _: (copy_text_to_clipboard(self.page, script_code), show_toast(self.page, "Google Apps Script 코드가 클립보드에 복사되었습니다!"))
+                            ),
+                        ],
+                        spacing=8,
+                        scroll=ft.ScrollMode.AUTO
+                    )
+                ),
+                actions=[
+                    ft.TextButton("닫기", on_click=lambda _: self.page.pop_dialog())
+                ],
+                bgcolor=SURFACE_CARD,
+                shape=ft.RoundedRectangleBorder(radius=14)
+            )
+            self.page.show_dialog(guide_dlg)
+
+        cloud_sync_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Row([
+                                    ft.Icon(ft.Icons.CLOUD_SYNC_ROUNDED, color=ACCENT_BLUE, size=20),
+                                    ft.Text("Google Drive 클라우드 동기화 (Sync)", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                ], spacing=6),
+                                sync_switch
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        ),
+                        ft.Text(
+                            "폰과 태블릿 등 여러 기기에서 동일한 구글 드라이브 폴더('JongJongTrader')를 통해 계좌 내역을 실시간으로 자동 동기화합니다.",
+                            size=11,
+                            color=TEXT_SECONDARY
+                        ),
+                        ft.Container(height=2),
+                        ft.Row(
+                            controls=[
+                                sync_url_field,
+                                ft.FilledButton(
+                                    "적용",
+                                    style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK, shape=ft.RoundedRectangleBorder(radius=8)),
+                                    on_click=handle_save_url
+                                ),
+                                ft.OutlinedButton(
+                                    "테스트",
+                                    style=ft.ButtonStyle(side=ft.BorderSide(1, ACCENT_BLUE), shape=ft.RoundedRectangleBorder(radius=8)),
+                                    on_click=handle_test_conn
+                                )
+                            ],
+                            spacing=6
+                        ),
+                        sync_status_text,
+                        sync_loading,
+                        ft.Container(height=2),
+                        ft.Row(
+                            controls=[
+                                ft.FilledButton(
+                                    content=ft.Row([ft.Icon(ft.Icons.SYNC, size=15), ft.Text("지금 즉시 동기화", size=12, weight=ft.FontWeight.BOLD)], spacing=4),
+                                    style=ft.ButtonStyle(bgcolor=PROFIT_GREEN, color=ft.Colors.WHITE, shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=10)),
+                                    expand=True,
+                                    on_click=handle_sync_now
+                                ),
+                                ft.OutlinedButton(
+                                    content=ft.Row([ft.Icon(ft.Icons.CLOUD_UPLOAD_OUTLINED, size=15, color=TEXT_PRIMARY), ft.Text("드라이브로 올리기", size=11, color=TEXT_PRIMARY)], spacing=4),
+                                    style=ft.ButtonStyle(side=ft.BorderSide(1, BORDER_COLOR), shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=10)),
+                                    expand=True,
+                                    tooltip="현재 기기의 계좌를 구글 드라이브에 강제 덮어쓰기 백업",
+                                    on_click=handle_force_upload
+                                ),
+                                ft.OutlinedButton(
+                                    content=ft.Row([ft.Icon(ft.Icons.CLOUD_DOWNLOAD_OUTLINED, size=15, color=TEXT_PRIMARY), ft.Text("드라이브에서 받기", size=11, color=TEXT_PRIMARY)], spacing=4),
+                                    style=ft.ButtonStyle(side=ft.BorderSide(1, BORDER_COLOR), shape=ft.RoundedRectangleBorder(radius=8), padding=ft.Padding.symmetric(vertical=10)),
+                                    expand=True,
+                                    tooltip="구글 드라이브의 계좌를 기기로 내려받아 적용 (기존 로컬 데이터는 자동 백업)",
+                                    on_click=handle_force_download
+                                ),
+                            ],
+                            spacing=6
+                        ),
+                        ft.OutlinedButton(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.HELP_OUTLINE, size=15, color=ACCENT_BLUE),
+                                ft.Text("1분 만에 끝내는 구글 드라이브 연동 가이드 & 스크립트 복사", size=11.5, color=ACCENT_BLUE, weight=ft.FontWeight.W_500)
+                            ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+                            style=ft.ButtonStyle(
+                                side=ft.BorderSide(1, ACCENT_BLUE),
+                                shape=ft.RoundedRectangleBorder(radius=8),
+                                padding=ft.Padding.symmetric(vertical=9)
+                            ),
+                            width=380,
+                            on_click=open_gas_guide_dialog
+                        )
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
+        # 3. 환율 설정 카드
         rate_field = ft.TextField(
             label="기준 환율 (1 USD = N 원)",
             value=f"{EXCHANGE_RATE:.0f}",
@@ -3361,7 +3728,6 @@ class MobileTradingApp:
                         ft.Text("다음 업데이트에서 다양한 개인화 및 자동화 설정이 제공될 예정입니다.", size=11, color=TEXT_SECONDARY),
                         ft.Container(height=4),
                         ft.Row([ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE_OUTLINED, size=16, color=TEXT_MUTED), ft.Text("미국 프리마켓 장전 목표가 도달 알림", size=12, color=TEXT_MUTED)], spacing=8),
-                        ft.Row([ft.Icon(ft.Icons.CLOUD_SYNC_OUTLINED, size=16, color=TEXT_MUTED), ft.Text("구글 드라이브 / 클라우드 계좌 백업 동기화", size=12, color=TEXT_MUTED)], spacing=8),
                         ft.Row([ft.Icon(ft.Icons.API, size=16, color=TEXT_MUTED), ft.Text("증권사 Open API 연동 및 자동 주문 전송", size=12, color=TEXT_MUTED)], spacing=8),
                         ft.Row([ft.Icon(ft.Icons.WIDGETS_OUTLINED, size=16, color=TEXT_MUTED), ft.Text("안드로이드 바탕화면 실시간 잔고 위젯", size=12, color=TEXT_MUTED)], spacing=8),
                     ],
@@ -3402,6 +3768,8 @@ class MobileTradingApp:
         return ft.ListView(
             controls=[
                 export_card,
+                ft.Container(height=6),
+                cloud_sync_card,
                 ft.Container(height=6),
                 rate_card,
                 ft.Container(height=6),
