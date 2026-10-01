@@ -15,7 +15,7 @@ import io
 import base64
 import subprocess
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import numpy as np
 
@@ -171,14 +171,124 @@ def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: floa
     return get_current_stock_price(ticker, fallback_price)
 
 
-def compute_suggested_trades(close_p: float, buy_orders: list, sell_orders: list):
+def parse_picked_date_str(val, e_data=None) -> str:
     """
-    종가(close_p)를 기준으로 LOC 매수 및 매도 체결 가능 수량을 산출합니다.
-    - 매수: 종가 <= LOC 주문단가인 주문들의 수량 합산
-    - 매도: 종가 >= LOC 주문단가인 주문들의 수량 합산
+    Flutter/Flet DatePicker에서 반환되는 DateTime 객체 또는 ISO 문자열을
+    한국 표준시(KST) 및 시스템 로컬 시간대 기준 YYYY-MM-DD 형식으로 안전하고 정확하게 변환합니다.
+    (Flutter DatePicker가 로컬 자정을 UTC로 직렬화하여 전송할 때 하루 전날로 밀리는 현상을 완벽 방지)
+    """
+    if not val and not e_data:
+        return ""
+    dt = None
+    if isinstance(val, (datetime, pd.Timestamp)):
+        dt = val
+    elif e_data:
+        try:
+            dt = datetime.fromisoformat(str(e_data).replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if dt is None:
+        try:
+            dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if dt is None:
+        return str(val or e_data)[:10]
+
+    if dt.tzinfo is not None:
+        local_dt = dt.astimezone()
+    else:
+        local_dt = dt
+
+    # 안드로이드/임베디드 환경이 시스템 로컬 타임존을 못 읽어 UTC로 남아있거나
+    # 자정이 UTC 변환되어 오후/저녁(12~23시)으로 넘어온 경우 한국 표준시(KST, UTC+9) 보정
+    if local_dt.hour >= 12:
+        kst = timezone(timedelta(hours=9))
+        if dt.tzinfo is not None:
+            local_dt = dt.astimezone(kst)
+        else:
+            local_dt = (dt + timedelta(hours=12)).replace(hour=0, minute=0, second=0)
+
+    return local_dt.strftime("%Y-%m-%d")
+
+
+def compute_suggested_trades(
+    close_p: float,
+    buy_orders: list,
+    sell_orders: list,
+    unsold_lots: list = None,
+    strategy_name: str = "",
+    netting_info: dict = None
+):
+    """
+    종가(close_p)를 기준으로 LOC 매수 및 매도 체결 수량을 산출합니다.
+    - 매도:
+      미매도 슬롯(unsold_lots)이 전달된 경우:
+      1) 보유일수 >= 10영업일 (10일 만기 MOC 슬롯): 무조건 매도 체결
+      2) 목표가 도달: 종가 >= 개별 슬롯 목표가(U) - 1e-4 인 모든 슬롯 전량 매도
+      (퉁치기 슬롯을 포함하여 종가가 목표가 이상이 된 모든 슬롯이 자동 매도 체결됨)
+      슬롯 정보가 없을 때는 기존 sell_orders 목록의 종가 >= 주문단가 수량 합산.
+    - 매수:
+      1) LOC 매수 주문 중 종가 <= 주문단가인 주문들의 수량 합산
+      2) 퉁치기 슬롯(최저 목표가 슬롯)이 매도 체결되었으나 LOC 매수 주문이 0주인 경우:
+         퉁치기 상계 원리에 따라 1회분 상계 매수 수량을 기본 제안
     """
     calc_buy_q = 0
     calc_sell_q = 0
+
+    target_reached_lots = []
+    min_u_lot = None
+
+    if unsold_lots:
+        for lot in unsold_lots:
+            # R 수량 확인
+            rq = lot.get('R')
+            if rq is None:
+                continue
+            try:
+                rq = int(rq)
+            except Exception:
+                continue
+            if rq <= 0 or bool(lot.get('Sold', False)):
+                continue
+
+            # 목표가 U 확인
+            u_val = lot.get('U')
+            if u_val is None or pd.isna(u_val):
+                bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
+                t_yield = 0.0275 if '종종이' in strategy_name else 0.05
+                u_val = bp * (1.0 + t_yield)
+            else:
+                u_val = float(u_val)
+
+            # 보유 일수 확인
+            h_days = int(lot.get('hold_days', 0))
+
+            is_moc = (h_days >= 10)
+            is_target_reached = (close_p >= u_val - 1e-4)
+
+            if is_moc or is_target_reached:
+                calc_sell_q += rq
+                target_reached_lots.append(lot)
+
+        valid_lots = [l for l in unsold_lots if int(l.get('R', 0)) > 0 and not bool(l.get('Sold', False))]
+        if valid_lots:
+            def _get_u(x):
+                val = x.get('U')
+                return float(val) if (val is not None and not pd.isna(val)) else 999999.0
+            min_u_lot = min(valid_lots, key=_get_u)
+    else:
+        for s in sell_orders:
+            sp = s.get('price')
+            if sp is None:
+                raw_p = str(s.get('주문단가', '0')).replace('$', '').replace(',', '').strip()
+                sp = float(raw_p) if raw_p else 0.0
+            sq = s.get('qty')
+            if sq is None:
+                raw_q = str(s.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
+                sq = int(raw_q) if raw_q else 0
+            if sp > 0 and sq > 0 and close_p >= sp - 1e-4:
+                calc_sell_q += sq
 
     for b in buy_orders:
         bp = b.get('price')
@@ -192,17 +302,12 @@ def compute_suggested_trades(close_p: float, buy_orders: list, sell_orders: list
         if bp > 0 and bq > 0 and close_p <= bp + 1e-4:
             calc_buy_q += bq
 
-    for s in sell_orders:
-        sp = s.get('price')
-        if sp is None:
-            raw_p = str(s.get('주문단가', '0')).replace('$', '').replace(',', '').strip()
-            sp = float(raw_p) if raw_p else 0.0
-        sq = s.get('qty')
-        if sq is None:
-            raw_q = str(s.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
-            sq = int(raw_q) if raw_q else 0
-        if sp > 0 and sq > 0 and close_p >= sp - 1e-4:
-            calc_sell_q += sq
+    # 퉁치기 슬롯이 익절 체결되었는데 당일 LOC 매수 체결이 0주인 경우:
+    # 퉁치기 상계 순매수 수량을 기본 제안 수량으로 자동 설정
+    if calc_buy_q == 0 and min_u_lot is not None and min_u_lot in target_reached_lots:
+        tung_q = int(min_u_lot.get('R', 0))
+        if tung_q > 0:
+            calc_buy_q = tung_q
 
     return calc_buy_q, calc_sell_q
 
@@ -528,11 +633,9 @@ class MobileTradingApp:
 
         def on_date_picked(e):
             val = e.control.value or dp.value
-            if val:
-                if isinstance(val, (datetime, pd.Timestamp)):
-                    target_field.value = val.strftime('%Y-%m-%d')
-                else:
-                    target_field.value = str(val)[:10]
+            date_str = parse_picked_date_str(val, getattr(e, 'data', None))
+            if date_str:
+                target_field.value = date_str
                 try:
                     target_field.update()
                 except Exception:
@@ -1746,9 +1849,18 @@ class MobileTradingApp:
         if not default_settle_date:
             default_settle_date = target_date or curr_d or datetime.now().strftime('%Y-%m-%d')
 
+        # 미매도 슬롯 및 전략 정보 추출
+        unsold_lots_data = dtl.get('unsold_lots', [])
+        if not unsold_lots_data and records:
+            unsold_lots_data = [r for r in records if int(r.get('R', 0)) > 0 and not bool(r.get('Sold', False))]
+        strat_name = acc.get('strategy', '')
+        net_info = dtl.get('netting_info', {})
+
         # 입력해야 하는 날짜의 종가를 기본값(default)으로 조회
         init_close = get_stock_price_for_date(ticker, default_settle_date, fallback_price=fallback_p)
-        calc_buy_q, calc_sell_q = compute_suggested_trades(init_close, buy_orders, sell_orders)
+        calc_buy_q, calc_sell_q = compute_suggested_trades(
+            init_close, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
+        )
 
         # 첫날 신규 계좌이고 매수 대기 중인데 계산이 0이면 1차 주문 수량으로 기본 제안
         if calc_buy_q == 0 and not records and buy_orders:
@@ -1798,7 +1910,7 @@ class MobileTradingApp:
         )
 
         sell_qty_field = ft.TextField(
-            label="체결매도(주)",
+            label="체결매도(자동)",
             label_style=ft.TextStyle(size=11, color=LOSS_RED),
             value=str(calc_sell_q),
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -1808,7 +1920,9 @@ class MobileTradingApp:
             text_size=12,
             text_align=ft.TextAlign.RIGHT,
             content_padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-            expand=True
+            expand=True,
+            read_only=True,
+            prefix_icon=ft.Icons.LOCK_ROUNDED
         )
 
         def on_settle_date_picked(new_date_str):
@@ -1818,7 +1932,9 @@ class MobileTradingApp:
             if len(d_clean) == 10:
                 p = get_stock_price_for_date(ticker, d_clean, fallback_price=fallback_p)
                 close_field.value = f"{p:.2f}"
-                b_q, s_q = compute_suggested_trades(p, buy_orders, sell_orders)
+                b_q, s_q = compute_suggested_trades(
+                    p, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
+                )
                 buy_qty_field.value = str(b_q)
                 sell_qty_field.value = str(s_q)
                 try:
@@ -1833,7 +1949,9 @@ class MobileTradingApp:
         def on_close_changed(e):
             try:
                 val = float(close_field.value.strip())
-                b_q, s_q = compute_suggested_trades(val, buy_orders, sell_orders)
+                b_q, s_q = compute_suggested_trades(
+                    val, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
+                )
                 buy_qty_field.value = str(b_q)
                 sell_qty_field.value = str(s_q)
                 buy_qty_field.update()
@@ -1873,7 +1991,7 @@ class MobileTradingApp:
                     controls=[
                         ft.Row([
                             ft.Icon(ft.Icons.CALCULATE_ROUNDED, color=ACCENT_BLUE, size=18),
-                            ft.Text("일일 정산 입력 (예상값 자동완성 & 임의 수정 가능)", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                            ft.Text("일일 정산 입력 (매도 자동 체결 / 매수 입력)", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                         ], spacing=6),
                         ft.Row([
                             settle_date_field,
@@ -1885,6 +2003,17 @@ class MobileTradingApp:
                             )
                         ], spacing=4),
                         ft.Row([close_field, buy_qty_field, sell_qty_field], spacing=6),
+                        ft.Container(
+                            padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.INFO_OUTLINE, size=13, color=TEXT_MUTED),
+                                ft.Text(
+                                    "목표가 이상 도달 슬롯은 매도 자동 체결(수정불가)되며, 매수 수량만 확인/입력하세요.",
+                                    size=10.5,
+                                    color=TEXT_MUTED
+                                )
+                            ], spacing=4)
+                        ),
                         ft.Row(
                             controls=[
                                 ft.FilledButton(

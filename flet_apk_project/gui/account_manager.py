@@ -420,12 +420,22 @@ class AccountManager:
 
         if shares_to_sell > 0:
             unsold_lots = [r for r in records if r.get('R', 0) > 0 and not r.get('Sold', False)]
+            t_yield = 0.0275 if '종종이' in acc.get('strategy', '') else 0.05
 
-            # 슬롯 매도 우선순위 정렬 (목표가 도달 익절 우선, 낮은 목표가 순)
+            def get_lot_u(lot):
+                raw_u = lot.get('U')
+                if raw_u is not None and not pd.isna(raw_u):
+                    return float(raw_u)
+                bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
+                return round_up(bp * (1.0 + t_yield), 2)
+
+            # 슬롯 매도 우선순위 정렬 (만기 및 목표가 도달 익절 우선, 낮은 목표가 순)
             def get_sort_key(lot):
-                u_val = float(lot.get('U', 999999.0)) if lot.get('U') is not None else 999999.0
+                u_val = get_lot_u(lot)
+                h_days = len(records) - 1 - int(lot.get('t', 0))
+                is_moc = (h_days >= 10)
                 is_target_reached = (close_p >= u_val - 1e-4)
-                priority = 0 if is_target_reached else 1
+                priority = 0 if (is_target_reached or is_moc) else 1
                 return (priority, u_val)
 
             sorted_unsold_lots = sorted(unsold_lots, key=get_sort_key)
@@ -433,10 +443,13 @@ class AccountManager:
             for lot in sorted_unsold_lots:
                 if shares_to_sell <= 0:
                     break
-                u_val = float(lot.get('U', 999999.0)) if lot.get('U') is not None else 999999.0
+                u_val = get_lot_u(lot)
+                h_days = len(records) - 1 - int(lot.get('t', 0))
+                is_moc = (h_days >= 10)
                 is_target_reached = (close_p >= u_val - 1e-4)
-                # 종종이 전략 보호: 개별 목표가에 도달하지 않은 슬롯은 손절 매도되지 않도록 철저히 보호
-                if not is_target_reached and '종종이' in acc.get('strategy', ''):
+
+                # 종종이 전략 보호: 목표가 미도달 및 만기 미도달 슬롯은 보호
+                if not is_target_reached and not is_moc and '종종이' in acc.get('strategy', ''):
                     continue
 
                 lot_r = int(lot['R'])
@@ -453,8 +466,14 @@ class AccountManager:
                     net_sell_proceeds += net_s
                     shares_to_sell -= lot_r
                 else:
-                    # 부분 매도 시 슬롯 분할 차감
-                    pass
+                    # 부분 매도 시 슬롯 차감
+                    sold_part = shares_to_sell
+                    lot['R'] = lot_r - sold_part
+                    gross_s = sell_p * sold_part
+                    net_s = gross_s - gross_s * (fee_rate + sec_fee)
+                    net_sell_proceeds += net_s
+                    shares_to_sell = 0
+                    break
 
         # 2. 매수 체결 정산
         buy_q = int(buy_qty)
@@ -735,6 +754,7 @@ class AccountManager:
         sell_orders = []
         buy_orders = []
         net_result = {}
+        unsold_lots = []
 
         if '종종이' in strategy_name:
             strat = JongJongStrategy(initial_capital=initial_seed)
@@ -853,6 +873,7 @@ class AccountManager:
             'mode': mode,
             'sell_orders': sell_orders,
             'buy_orders': buy_orders,
+            'unsold_lots': unsold_lots,
             'netting_info': net_result,
             'df_res': df_res,
             'adjustments': adjustments

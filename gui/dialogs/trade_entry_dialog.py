@@ -96,17 +96,15 @@ class RecordCloseDialog(tk.Toplevel):
         self.entry_buy_price.insert(0, f"{last_price:.2f}")
         self.entry_buy_price.pack(side='left', padx=4)
 
-        # 매도 체결
+        # 매도 체결 (자동 체결 / 수정 불가)
         r_sell = ttk.Frame(edit_box)
         r_sell.pack(fill='x', pady=4)
-        ttk.Label(r_sell, text="실제 매도 체결 수량:", width=18, font=FONTS['body_bold']).pack(side='left')
-        self.entry_sell_qty = ttk.Entry(r_sell, width=12, font=FONTS['body'])
-        self.entry_sell_qty.insert(0, "0")
+        ttk.Label(r_sell, text="실제 매도 체결 수량 (자동):", width=22, font=FONTS['body_bold']).pack(side='left')
+        self.entry_sell_qty = ttk.Entry(r_sell, width=12, font=FONTS['body'], state='readonly')
         self.entry_sell_qty.pack(side='left', padx=(4, 16))
 
         ttk.Label(r_sell, text="매도 체결 단가 ($):", width=16).pack(side='left')
-        self.entry_sell_price = ttk.Entry(r_sell, width=12, font=FONTS['body'])
-        self.entry_sell_price.insert(0, f"{last_price:.2f}")
+        self.entry_sell_price = ttk.Entry(r_sell, width=12, font=FONTS['body'], state='readonly')
         self.entry_sell_price.pack(side='left', padx=4)
 
         # 비고 / 메모
@@ -158,17 +156,25 @@ class RecordCloseDialog(tk.Toplevel):
             target_reached_lots = []
             for lot in unsold_lots:
                 u_p = float(lot.get('U', 0.0)) if lot.get('U') is not None else 0.0
-                if u_p > 0 and close_p >= u_p - 1e-4:
-                    target_reached_lots.append(lot)
+                if u_p <= 0:
+                    bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
+                    u_p = round(bp * 1.0275, 2)
+                h_days = len(records) - 1 - int(lot.get('t', 0))
+                is_moc = (h_days >= 10)
+                is_reached = (close_p >= u_p - 1e-4)
+                if is_moc or is_reached:
+                    target_reached_lots.append((lot, is_moc, u_p))
 
             auto_sell_qty = 0
             filled_sells = []
-            # 목표가 도달 슬롯들을 매도 체결 목록에 추가
-            for lot in target_reached_lots:
+            # 목표가 도달 및 만기 슬롯들을 매도 체결 목록에 추가
+            for lot, is_moc, u_p in target_reached_lots:
                 q = int(lot['R'])
-                u_p = float(lot['U'])
                 auto_sell_qty += q
-                filled_sells.append(f"{lot.get('Date', '')} 로트({q}주@목표${u_p:.2f})")
+                if is_moc:
+                    filled_sells.append(f"{lot.get('Date', '')} 만기로트({q}주@MOC)")
+                else:
+                    filled_sells.append(f"{lot.get('Date', '')} 로트({q}주@목표${u_p:.2f})")
 
             # 2. 매수 체결 분석
             auto_buy_qty = 0
@@ -185,9 +191,10 @@ class RecordCloseDialog(tk.Toplevel):
             # 퉁치기 모드에서 퉁치기 슬롯(최저 목표가 슬롯)이 익절 체결된 경우:
             # 퉁치기 상계 원리에 따라 당일 1회분 매수도 함께 체결됨
             netting_info = self.today_orders.get('netting_info', {})
+            reached_lots_raw = [t[0] for t in target_reached_lots]
             if netting_info.get('is_netted') and auto_buy_qty == 0 and unsold_lots:
                 min_u_lot = min(unsold_lots, key=lambda x: float(x.get('U', 999999.0)))
-                if min_u_lot in target_reached_lots:
+                if min_u_lot in reached_lots_raw:
                     tung_q = int(min_u_lot['R'])
                     auto_buy_qty = tung_q
                     filled_buys.append(f"퉁치기 상계 순매수({tung_q}주@${close_p:.2f})")
@@ -222,11 +229,15 @@ class RecordCloseDialog(tk.Toplevel):
             self.entry_buy_price.delete(0, 'end')
             self.entry_buy_price.insert(0, f"{close_p:.2f}")
 
+            self.entry_sell_qty.config(state='normal')
             self.entry_sell_qty.delete(0, 'end')
             self.entry_sell_qty.insert(0, str(auto_sell_qty))
+            self.entry_sell_qty.config(state='readonly')
 
+            self.entry_sell_price.config(state='normal')
             self.entry_sell_price.delete(0, 'end')
             self.entry_sell_price.insert(0, f"{close_p:.2f}")
+            self.entry_sell_price.config(state='readonly')
         except Exception as e:
             import traceback
             traceback.print_exc()
