@@ -935,6 +935,18 @@ class MobileTradingApp:
             )
         ]
 
+        self.page.appbar = ft.AppBar(
+            leading=self.leading_icon,
+            title=ft.Column(
+                controls=[self.title_text, self.subtitle_text],
+                spacing=1,
+                alignment=ft.MainAxisAlignment.CENTER
+            ),
+            actions=self.action_buttons,
+            bgcolor=SURFACE_CARD,
+            elevation=2
+        )
+
     def handle_quick_cloud_sync(self):
         """상단 앱바 클라우드 아이콘 터치 시 구글 드라이브 동기화를 실행합니다."""
         if not is_sync_enabled():
@@ -951,17 +963,6 @@ class MobileTradingApp:
                 show_toast(self.page, f"동기화 실패: {msg}", is_error=True)
         threading.Thread(target=_bg_sync, daemon=True).start()
 
-        self.page.appbar = ft.AppBar(
-            leading=self.leading_icon,
-            title=ft.Column(
-                controls=[self.title_text, self.subtitle_text],
-                spacing=1,
-                alignment=ft.MainAxisAlignment.CENTER
-            ),
-            actions=self.action_buttons,
-            bgcolor=SURFACE_CARD,
-            elevation=2
-        )
 
     def _setup_bottom_nav(self):
         self.bottom_nav = ft.NavigationBar(
@@ -1101,15 +1102,22 @@ class MobileTradingApp:
             self.subtitle_text.value = "데이터 내보내기 및 시스템 설정"
             self.leading_icon.content = ft.Icon(ft.Icons.SETTINGS_OUTLINED, color=ACCENT_BLUE, size=22)
 
-        self.page.appbar.leading = self.leading_icon
-        self.page.appbar.actions = [
-            ft.IconButton(
-                icon=ft.Icons.REFRESH_ROUNDED,
-                icon_color=TEXT_SECONDARY,
-                tooltip="새로고침",
-                on_click=lambda e: self.reload_data(show_message=True)
-            )
-        ]
+        if self.page.appbar:
+            self.page.appbar.leading = self.leading_icon
+            self.page.appbar.actions = [
+                ft.IconButton(
+                    icon=ft.Icons.CLOUD_SYNC_ROUNDED,
+                    icon_color=ACCENT_BLUE,
+                    tooltip="구글 드라이브 동기화",
+                    on_click=lambda e: self.handle_quick_cloud_sync()
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.REFRESH_ROUNDED,
+                    icon_color=TEXT_SECONDARY,
+                    tooltip="새로고침",
+                    on_click=lambda e: self.reload_data(show_message=True)
+                )
+            ]
 
     def _update_appbar_for_detail(self, target_acc: dict):
         acc_name = target_acc.get('name', '계좌')
@@ -1119,33 +1127,40 @@ class MobileTradingApp:
         self.title_text.value = f"{acc_name} ({ticker})"
         self.subtitle_text.value = strat
 
-        # 뒤로가기 버튼
-        self.page.appbar.leading = ft.IconButton(
-            icon=ft.Icons.ARROW_BACK,
-            icon_color=TEXT_PRIMARY,
-            tooltip="계좌 목록으로",
-            on_click=self.back_to_accounts
-        )
-        self.page.appbar.actions = [
-            ft.IconButton(
-                icon=ft.Icons.SETTINGS_OUTLINED,
-                icon_color=TEXT_SECONDARY,
-                tooltip="계좌 설정",
-                on_click=lambda e, aid=target_acc['id']: self.open_settings_dialog(aid)
-            ),
-            ft.IconButton(
-                icon=ft.Icons.DELETE_OUTLINE,
-                icon_color=LOSS_RED,
-                tooltip="계좌 삭제",
-                on_click=lambda e, aid=target_acc['id']: self.open_delete_account_dialog(aid)
-            ),
-            ft.IconButton(
-                icon=ft.Icons.REFRESH_ROUNDED,
-                icon_color=TEXT_SECONDARY,
-                tooltip="새로고침",
-                on_click=lambda e: self.reload_data(show_message=True)
+        if self.page.appbar:
+            # 뒤로가기 버튼
+            self.page.appbar.leading = ft.IconButton(
+                icon=ft.Icons.ARROW_BACK,
+                icon_color=TEXT_PRIMARY,
+                tooltip="계좌 목록으로",
+                on_click=self.back_to_accounts
             )
-        ]
+            self.page.appbar.actions = [
+                ft.IconButton(
+                    icon=ft.Icons.CLOUD_SYNC_ROUNDED,
+                    icon_color=ACCENT_BLUE,
+                    tooltip="구글 드라이브 동기화",
+                    on_click=lambda e: self.handle_quick_cloud_sync()
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.SETTINGS_OUTLINED,
+                    icon_color=TEXT_SECONDARY,
+                    tooltip="계좌 설정",
+                    on_click=lambda e, aid=target_acc['id']: self.open_settings_dialog(aid)
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    icon_color=LOSS_RED,
+                    tooltip="계좌 삭제",
+                    on_click=lambda e, aid=target_acc['id']: self.open_delete_account_dialog(aid)
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.REFRESH_ROUNDED,
+                    icon_color=TEXT_SECONDARY,
+                    tooltip="새로고침",
+                    on_click=lambda e: self.reload_data(show_message=True)
+                )
+            ]
 
     # =================================================================
     # TAB 0: 🏠 홈 (전체 통합 자산 현황 & 포트폴리오 그래프)
