@@ -70,18 +70,22 @@ def copy_text_to_clipboard(page: ft.Page, text: str):
     """
     try:
         cb = ft.Clipboard()
-        if cb not in page.overlay:
-            page.overlay.append(cb)
+        if hasattr(page, "services") and cb not in page.services:
+            page.services.append(cb)
             page.update()
-        cb.set(text)
-    except Exception:
-        pass
+        if hasattr(page, "run_task"):
+            page.run_task(cb.set, text)
+        else:
+            cb.set(text)
+    except Exception as e:
+        print(f"Clipboard copy error: {e}")
 
     if sys.platform == "win32":
         try:
             subprocess.run(["clip.exe"], input=text.encode("utf-16"), check=True)
         except Exception:
             pass
+
 
 
 def show_toast(page: ft.Page, message: str, is_error: bool = False):
@@ -3446,40 +3450,78 @@ class MobileTradingApp:
                     width=380,
                     content=ft.Column(
                         controls=[
-                            ft.Text(
-                                "내 개인 Google Drive에 스크립트를 배포하여 폰과 태블릿 간 실시간 동기화를 구축하는 초간단 방법입니다:\n",
-                                size=11, color=TEXT_SECONDARY
-                            ),
                             ft.Container(
-                                padding=12,
+                                padding=10,
                                 bgcolor=SURFACE_CONTAINER,
                                 border_radius=8,
                                 content=ft.Column(
                                     controls=[
-                                        ft.Text("1. 브라우저로 drive.google.com 접속", size=11.5, color=TEXT_PRIMARY),
-                                        ft.Text("2. '+ 새로 만들기' -> '더보기' -> 'Google Apps Script' 클릭", size=11.5, color=TEXT_PRIMARY),
-                                        ft.Text("3. 기존 내용을 지우고 아래 버튼으로 복사한 코드 전체 붙여넣기", size=11.5, color=TEXT_PRIMARY),
-                                        ft.Text("4. 우측 상단 파란색 [배포] -> [새 배포] 클릭", size=11.5, color=TEXT_PRIMARY),
-                                        ft.Text("   • 유형: [웹 앱(Web App)] 선택", size=11, color=ACCENT_BLUE),
-                                        ft.Text("   • 실행 권한: '나(내 이메일)'", size=11, color=TEXT_PRIMARY),
-                                        ft.Text("   • 액세스 권한: '모든 사용자(Anyone)' 선택 (필수!)", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
-                                        ft.Text("5. [배포] 클릭 후 발급된 '웹 앱 URL' 복사 -> 앱에 붙여넣기 끝!", size=11.5, color=TEXT_PRIMARY),
+                                        ft.Row([
+                                            ft.Icon(ft.Icons.DESKTOP_WINDOWS, size=16, color=ACCENT_BLUE),
+                                            ft.Text("PC 브라우저에서 1회 배포 권장 (1분 소요)", size=12, weight=ft.FontWeight.BOLD, color=ACCENT_BLUE)
+                                        ], spacing=6),
+                                        ft.Text(
+                                            "모바일 웹 브라우저는 구글 정책상 개발자 도구('Google Apps Script') 메뉴가 보이지 않습니다.\n"
+                                            "PC 브라우저에서 1분 만에 배포 후, 발급된 URL만 카카오톡(나에게 보내기) 등으로 폰에 복사해 오시면 가장 간편합니다!",
+                                            size=11, color=TEXT_SECONDARY
+                                        ),
+                                        ft.Text("※ 폰에서 직접 하려면: 모바일 브라우저 메뉴(⋮)에서 '데스크톱 사이트'를 체크하세요.", size=10, color=TEXT_MUTED),
                                     ],
-                                    spacing=5
+                                    spacing=4
                                 )
                             ),
-                            ft.Container(height=6),
+                            ft.Container(height=4),
+                            ft.Container(
+                                padding=10,
+                                bgcolor=SURFACE_CONTAINER,
+                                border_radius=8,
+                                content=ft.Column(
+                                    controls=[
+                                        ft.Text("1. PC 브라우저로 drive.google.com (또는 script.google.com) 접속", size=11, color=TEXT_PRIMARY),
+                                        ft.Text("2. '+ 새로 만들기' -> '더보기' -> 'Google Apps Script' 생성", size=11, color=TEXT_PRIMARY),
+                                        ft.Text("3. 기존 내용을 지우고 아래 스크립트 코드 전체 붙여넣기", size=11, color=TEXT_PRIMARY),
+                                        ft.Text("4. 우측 상단 파란색 [배포] -> [새 배포] 클릭", size=11, color=TEXT_PRIMARY),
+                                        ft.Text("   • 유형: [웹 앱(Web App)] 선택", size=11, color=ACCENT_BLUE),
+                                        ft.Text("   • 다음 사용자 권한으로 실행: '나(내 이메일)'", size=11, color=TEXT_PRIMARY),
+                                        ft.Text("   • 액세스 권한: '모든 사용자(Anyone)' 선택 (필수!)", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
+                                        ft.Text("5. [배포] 클릭 후 발급된 '웹 앱 URL' 복사 -> 앱에 붙여넣기 끝!", size=11, color=TEXT_PRIMARY),
+                                    ],
+                                    spacing=4
+                                )
+                            ),
+                            ft.Container(height=4),
+                            ft.Text("Google Apps Script 소스 코드 (길게 눌러 복사 가능):", size=11, color=TEXT_MUTED, weight=ft.FontWeight.BOLD),
+                            ft.TextField(
+                                value=script_code,
+                                multiline=True,
+                                min_lines=4,
+                                max_lines=6,
+                                read_only=True,
+                                text_size=10,
+                                border_color=BORDER_COLOR,
+                                color=TEXT_PRIMARY,
+                                content_padding=ft.Padding.all(8)
+                            ),
                             ft.FilledButton(
                                 content=ft.Row([
                                     ft.Icon(ft.Icons.CONTENT_COPY, size=15),
-                                    ft.Text("구글 스크립트 코드 전체 클립보드 복사", size=12, weight=ft.FontWeight.BOLD)
+                                    ft.Text("스크립트 코드 전체 클립보드 복사", size=12, weight=ft.FontWeight.BOLD)
                                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
                                 style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK, shape=ft.RoundedRectangleBorder(radius=8)),
                                 width=380,
-                                on_click=lambda _: (copy_text_to_clipboard(self.page, script_code), show_toast(self.page, "Google Apps Script 코드가 클립보드에 복사되었습니다!"))
+                                on_click=lambda _: (copy_text_to_clipboard(self.page, script_code), show_toast(self.page, "Google Apps Script 코드가 복사되었습니다!"))
                             ),
+                            ft.OutlinedButton(
+                                content=ft.Row([
+                                    ft.Icon(ft.Icons.OPEN_IN_BROWSER, size=15, color=ACCENT_BLUE),
+                                    ft.Text("Google Apps Script 에디터 바로 열기", size=12, color=ACCENT_BLUE)
+                                ], alignment=ft.MainAxisAlignment.CENTER, spacing=6),
+                                style=ft.ButtonStyle(side=ft.BorderSide(1, ACCENT_BLUE), shape=ft.RoundedRectangleBorder(radius=8)),
+                                width=380,
+                                url="https://script.google.com/home/start"
+                            )
                         ],
-                        spacing=8,
+                        spacing=6,
                         scroll=ft.ScrollMode.AUTO
                     )
                 ),
