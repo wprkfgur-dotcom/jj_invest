@@ -43,8 +43,8 @@ for tm in target_mains:
     shutil.copy2(SRC_APP, tm)
     print(f"Copied {SRC_APP} -> {tm}")
 
-# 3. 핵심 파이썬 모듈 (core, gui, strategies) 동기화
-for folder in ["core", "gui", "strategies"]:
+# 3. 핵심 파이썬 모듈 (core, gui, strategies, mobile) 동기화
+for folder in ["core", "gui", "strategies", "mobile"]:
     src_folder = os.path.join(BASE_DIR, folder)
     if not os.path.exists(src_folder):
         continue

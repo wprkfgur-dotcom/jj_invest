@@ -215,7 +215,7 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
             '누적수량': f"{accum_s:,}주",
             '예상금액': f"${s['price'] * s['qty']:,.2f}",
             '체결조건': f"종가 ≥ ${s['price']:.2f}",
-            '비고': f"자전거래 상계 후 잔여 매도",
+            '비고': "자전거래 상계 후 잔여 매도",
             'price': s['price'],
             'qty': s['qty']
         })
@@ -232,7 +232,7 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
             '누적수량': f"{accum_b:,}주",
             '예상금액': f"${b['price'] * b['qty']:,.2f}",
             '체결조건': f"종가 ≤ ${b['price']:.2f}",
-            '비고': f"자전거래 상계 후 순매수",
+            '비고': "자전거래 상계 후 순매수",
             'price': b['price'],
             'qty': b['qty']
         })

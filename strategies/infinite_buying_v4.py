@@ -80,7 +80,6 @@ class InfiniteBuyingV4Strategy(BaseStrategy):
         dates = df_period['Date'].values
         closes = df_period['Close'].values
         highs = df_period['High'].values if 'High' in df_period.columns else closes
-        lows = df_period['Low'].values if 'Low' in df_period.columns else closes
 
         for i in range(len(df_period)):
             d = dates[i]
@@ -162,9 +161,6 @@ class InfiniteBuyingV4Strategy(BaseStrategy):
                 t_after_sell = T
                 if shares_sold_quarter > 0 and hold_after_sell > 0:
                     t_after_sell = t_after_sell * 0.75
-
-                # 만약 지정가 매도와 쿼터 매도로 전량 청산된 경우 (사이클 종료)
-                cycle_completed = (hold > 0 and hold_after_sell == 0)
 
                 # (4) 매수 주문 처리
                 buy_qty = 0

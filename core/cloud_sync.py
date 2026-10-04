@@ -109,7 +109,6 @@ def test_connection(url: Optional[str] = None) -> Tuple[bool, str]:
                     data = resp.json()
                     if data.get("status") == "ok":
                         msg = data.get("message", "연결 성공")
-                        ts = data.get("timestamp", "")
                         return True, f"Google Drive 연동 성공! ({msg})"
                     else:
                         return False, f"응답 오류: {data.get('message', '알 수 없는 응답')}"

@@ -1,6 +1,15 @@
-# jj_invest ⚡ 종종이 & 무한매수 자동매매 시스템
+# jj_invest ⚡ 종종이 & 무한매수 주식 매매 시스템
 
 미국 레버리지 ETF(SOXL, TQQQ 등)를 위한 **종종이(JJ) 3단계 LOC 매매 전략 & 라오어 무한매수법 v4.0** 통합 실매매 관리 및 백테스트 플랫폼입니다.
+
+---
+
+## 🎯 지원 플랫폼 및 공식 배포 타깃
+
+본 프로젝트는 **모바일 우선(Mobile-First)** 단일 코드베이스로 운영되며, 공식 배포 타깃은 아래 2종입니다:
+
+1. 📱 **안드로이드 릴리스 앱**: `dist\JongJongTrader_ARM64.apk`
+2. 💻 **윈도우 모바일 뷰 앱**: `dist\JongJongTrader_Mobile.exe`
 
 ---
 
@@ -12,11 +21,14 @@
    - **오늘의 LOC 순 주문표 (퉁치기 상계 반영)**: 당일 장전에 걸어야 할 1차~4차 LOC 분할 매수 및 익절/손절 매도 주문을 실시간 자동 계산
    - **일일 체결 정산 & 캘린더 연동**: 미국 정규장 일정에 맞춘 Next Day 진행 및 일일 종가/체결 수량 입력 정산
    - **자산 입출금 및 세금 인출 관리**: 투자금 추가 입금 및 세금 납부를 위한 출금 이력 관리
-   - **매매 일지 CSV 내보내기/불러오기**: 과거 엑셀/CSV 매매 일지를 그대로 이어받아 운용 가능
+   - **구글 드라이브 클라우드 동기화**: PC와 모바일 간 계좌 및 거래 데이터 실시간 양방향 연동
 
 2. **📊 백테스트 시뮬레이터 (Backtest Simulator)**
    - 기간별, 종목별(SOXL, TQQQ 등), 초기 시드별 전략 성과 정밀 분석
    - 총수익률, 연평균 성장률(CAGR), 최대 낙폭(MDD), 샤프 지수, 칼마 비율 및 자산 성장 곡선 차트 제공
+
+3. **🔄 원클릭 자동 업데이트 시스템**
+   - GitHub Releases와 연동되어 신규 버전 출시 시 앱 내에서 즉시 감지 및 다이렉트 업데이트 지원
 
 ---
 
@@ -25,49 +37,55 @@
 ```text
 jj_invest/
 ├── core/                       # 공통 코어 모듈
-│   ├── data.py                 # 야후 파이낸스 시세 다운로드 및 메모리 캐시
-│   ├── market_calendar.py      # 미국 증시 개장일 캘린더 연동
-│   ├── metrics.py              # CAGR, MDD, 샤프/칼마비율 성과 분석
-│   └── visualizer.py           # 자산 곡선 및 낙폭 비교 차트 시각화
+│   ├── app_update.py           # GitHub Releases 연동 자동 업데이트 엔진
+│   ├── cloud_sync.py           # 구글 드라이브(GAS) 실시간 클라우드 동기화
+│   ├── data.py                 # 야후 파이낸스 시세 다운로드 & SQLite DB 캐시
+│   ├── market_calendar.py      # 미국 증시 개장일 캘린더
+│   └── metrics.py              # CAGR, MDD, 샤프/칼마비율 성과 분석
 ├── strategies/                 # 투자 전략 모듈
 │   ├── base.py                 # BaseStrategy 추상 기본 클래스
 │   ├── jongjong.py             # 종종이(JJ) 3단계 모드 & LOC 4분할 매매 전략
 │   ├── infinite_buying_v4.py   # 라오어 무한매수법 v4.0 전략
 │   └── buy_and_hold.py         # 단순 보유(Buy & Hold) 벤치마크 전략
-├── gui/                        # GUI 대시보드 (Tkinter)
-│   ├── tabs/
-│   │   ├── accounts_tab.py     # 계좌 관리 & 실매매 대시보드 탭
-│   │   └── backtest_tab.py     # 백테스트 시뮬레이터 탭
-│   ├── dialogs/
-│   │   └── trade_entry_dialog.py # 체결 정산 & 일지 수정 다이얼로그
+├── gui/                        # 핵심 비즈니스 로직
 │   ├── account_manager.py      # 계좌 데이터 영속성 관리
-│   ├── order_netting.py        # 퉁치기(상계) 주문 계산 엔진
-│   ├── main_window.py          # 메인 윈도우 프레임워크
-│   └── theme.py                # 다크 모드 테마 및 스타일링
+│   └── order_netting.py        # 퉁치기(상계) 주문 계산 엔진
+├── mobile/                     # 모바일 UI 보조 모듈
+│   ├── theme.py                # 색상 테마 및 스타일링 상수
+│   ├── helpers.py              # 클립보드, 토스트, 날짜 파싱 헬퍼
+│   └── charts.py               # 벡터 SVG 차트 렌더러
 ├── data/                       # 데이터 저장소 (accounts.json 등)
-│   └── accounts.example.json   # 계좌 템플릿 예시 파일
-├── main.py                     # GUI 애플리케이션 진입점
-├── backtest.py                 # 백테스트 CLI 실행기
-├── optimize.py                 # 종종이 파라미터 최적화 엔진
-├── requirements.txt            # 의존성 라이브러리 목록
-└── README.md                   # 프로젝트 문서
+│   ├── accounts.example.json   # 계좌 템플릿 예시 파일
+│   └── market_data.db          # 시세 로컬 캐시 DB
+├── flet_apk_project/           # Flutter/SeriousPython 안드로이드 APK 빌드 프로젝트
+├── dist/                       # 컴파일된 최종 산출물 (바이너리 전용 보관함)
+│   ├── JongJongTrader_ARM64.apk   # 안드로이드 실기기 설치 APK
+│   └── JongJongTrader_Mobile.exe  # 윈도우 모바일뷰 실행파일
+├── mobile_app.py               # 모바일 Flet 애플리케이션 메인 소스
+├── run_mobile.bat              # 윈도우 로컬 모바일 프리뷰 실행기
+├── build_mobile_exe.py         # 윈도우 모바일 실행파일 빌드 스크립트
+├── build_arm64_release_apk.ps1 # 안드로이드 ARM64 Release APK 빌드 스크립트
+├── sync_app.py                 # 소스코드 -> APK 빌드 프로젝트 동기화 스크립트
+├── DEVELOPMENT_POLICY.md       # 개발 및 릴리스 정책 가이드
+├── CHANGELOG.md                # 버전별 릴리스 노트
+└── requirements.txt            # 의존성 패키지 목록
 ```
 
 ---
 
 ## 🚀 빠른 시작
 
-### 1. 환경 구성 및 패키지 설치
+### 1. 로컬 환경에서 모바일 뷰 실행 (Windows)
 ```powershell
-pip install -r requirements.txt
+.\run_mobile.bat
 ```
 
-### 2. GUI 자동매매 대시보드 실행
+### 2. 안드로이드 Release APK 빌드
 ```powershell
-python main.py
+powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1
 ```
 
-### 3. CLI 백테스트 실행
+### 3. 윈도우용 모바일 실행파일 빌드
 ```powershell
-python backtest.py
+python build_mobile_exe.py
 ```

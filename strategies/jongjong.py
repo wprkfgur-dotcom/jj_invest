@@ -194,7 +194,7 @@ class JongJongStrategy(BaseStrategy):
             is_riskoff = (mode == 'Riskoff')
 
             BB3 = excel_round(AU2 * (1.0 + C2), 2)
-            AU3, AV3, AW3 = None, 0, None
+            AU3, AV3 = None, 0
             if len(loc_lots) > 0:
                 min_u = min(rec['U'] for rec in loc_lots)
                 if is_normal and BB3 >= min_u:
@@ -202,7 +202,6 @@ class JongJongStrategy(BaseStrategy):
                     for rec in loc_lots:
                         if rec['U'] == min_u:
                             AV3 = rec['R']
-                            AW3 = rec['t']
                             break
 
             a_val = C2 if is_normal else (O4 if is_riskoff else 0.0)

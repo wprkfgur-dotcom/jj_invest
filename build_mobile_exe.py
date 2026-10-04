@@ -34,13 +34,19 @@ if not os.path.exists(target_script):
 
 print(f"  flet    : {flet_exe}")
 print(f"  소스    : {target_script}")
-print(f"  출력    : dist/JongJongTrader_Mobile.exe")
+print("  출력    : dist/JongJongTrader_Mobile.exe")
 print("-" * 55)
+
+temp_dist = os.path.join(current_dir, "build", "dist_mobile")
+final_dist = os.path.join(current_dir, "dist")
+os.makedirs(final_dist, exist_ok=True)
 
 # flet pack 명령 실행
 cmd = [
     flet_exe,
     "pack",
+    "-y",
+    "--distpath", temp_dist,
     "--name", "JongJongTrader_Mobile",
     "--product-name", "JongJong Trader",
     "--product-version", "2.0.0",
@@ -49,6 +55,7 @@ cmd = [
     "--",
     "--noconsole",
     "--clean",
+    "--noconfirm",
     "--hidden-import=flet",
     "--hidden-import=flet_core",
     "--hidden-import=pandas",
@@ -58,6 +65,10 @@ cmd = [
     "--hidden-import=urllib3",
     "--hidden-import=certifi",
     "--hidden-import=charset_normalizer",
+    "--hidden-import=mobile",
+    "--hidden-import=mobile.theme",
+    "--hidden-import=mobile.helpers",
+    "--hidden-import=mobile.charts",
 ]
 
 print("실행 중... (수 분 소요될 수 있습니다)")
@@ -70,16 +81,15 @@ if res.returncode == 0:
     print("\n" + "=" * 55)
     print("  빌드 성공!")
     print("=" * 55)
-    exe_path = os.path.join(current_dir, "dist", "JongJongTrader_Mobile.exe")
-    if os.path.exists(exe_path):
-        size_mb = os.path.getsize(exe_path) / (1024 * 1024)
-        print(f"  EXE 경로 : {exe_path}")
+    built_exe = os.path.join(temp_dist, "JongJongTrader_Mobile.exe")
+    final_exe = os.path.join(final_dist, "JongJongTrader_Mobile.exe")
+    if os.path.exists(built_exe):
+        shutil.copy2(built_exe, final_exe)
+        size_mb = os.path.getsize(final_exe) / (1024 * 1024)
+        print(f"  EXE 경로 : {final_exe}")
         print(f"  크기     : {size_mb:.1f} MB")
-        root_exe = os.path.join(current_dir, "JongJongTrader_Mobile.exe")
-        shutil.copy2(exe_path, root_exe)
-        print(f"  루트 복사 : {root_exe}")
     else:
-        print("  [경고] dist 폴더에서 EXE를 찾지 못했습니다.")
+        print(f"  [경고] {built_exe}를 찾지 못했습니다.")
 else:
     print(f"\n[빌드 실패] 종료 코드: {res.returncode}")
     sys.exit(res.returncode)

@@ -11,11 +11,9 @@
 """
 import sys
 import os
-import base64
 import subprocess
-import re
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import pandas as pd
 
 # UTF-8 출력 보장
@@ -33,7 +31,7 @@ if CURRENT_DIR not in sys.path:
 import flet as ft
 
 from gui.account_manager import AccountManager
-from core.data import fetch_market_data, get_price_from_db, get_db_date_range
+from core.data import fetch_market_data, get_db_date_range
 from core.metrics import calculate_metrics
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
@@ -50,582 +48,20 @@ from core.app_update import (
 )
 
 
-# =====================================================================
-# 색상 테마 및 디자인 상수
-# =====================================================================
-BG_DARK = "#0B0F19"           # 전체 배경 (딥 다크)
-SURFACE_CARD = "#151C2C"      # 카드 배경
-SURFACE_CONTAINER = "#1E293B" # 입력 필드 / 하위 컨테이너 배경
-BORDER_COLOR = "#243049"      # 구분선 및 카드 테두리
-ACCENT_BLUE = "#38BDF8"       # 메인 강조 하늘색
-PROFIT_GREEN = "#10B981"      # 수익/매수 에메랄드 그린
-LOSS_RED = "#F43F5E"          # 손실/매도 로즈 레드
-RESERVE_AMBER = "#F59E0B"     # 위기준비금 앰버
-TEXT_PRIMARY = "#F8FAFC"      # 본문 화이트
-TEXT_SECONDARY = "#94A3B8"    # 보조 텍스트 (그레이)
-TEXT_MUTED = "#64748B"
+from mobile.theme import (
+    BG_DARK, SURFACE_CARD, SURFACE_CONTAINER, BORDER_COLOR, ACCENT_BLUE, PROFIT_GREEN,
+    LOSS_RED, RESERVE_AMBER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+)
+from mobile.helpers import (
+    copy_text_to_clipboard, show_toast, make_bug_report_mailto, parse_picked_date_str,
+    compute_suggested_trades, extract_pct_str,
+)
+from mobile.charts import render_portfolio_chart, render_multi_backtest_chart
+from core.data import get_stock_price_for_date
+
+EXCHANGE_RATE = 1380.0        # USD/KRW ?? ??
 
-EXCHANGE_RATE = 1380.0        # USD/KRW 환율 기준
 
-
-def copy_text_to_clipboard(page: ft.Page, text: str):
-    """
-    Windows 및 모바일(Android) 환경 모두에서 안전하게 클립보드에 텍스트를 복사합니다.
-    """
-    try:
-        cb = ft.Clipboard()
-        if hasattr(page, "services") and cb not in page.services:
-            page.services.append(cb)
-            page.update()
-        if hasattr(page, "run_task"):
-            page.run_task(cb.set, text)
-        else:
-            cb.set(text)
-    except Exception as e:
-        print(f"Clipboard copy error: {e}")
-
-    if sys.platform == "win32":
-        try:
-            subprocess.run(["clip.exe"], input=text.encode("utf-16"), check=True)
-        except Exception:
-            pass
-
-
-
-def show_toast(page: ft.Page, message: str, is_error: bool = False):
-    """
-    모바일 플로팅 토스트 알림을 표시합니다.
-    """
-    sb = ft.SnackBar(
-        content=ft.Row(
-            controls=[
-                ft.Icon(
-                    ft.Icons.ERROR_OUTLINE if is_error else ft.Icons.CHECK_CIRCLE_OUTLINE,
-                    color=ft.Colors.WHITE,
-                    size=20
-                ),
-                ft.Text(message, color=ft.Colors.WHITE, size=13, weight=ft.FontWeight.W_500, expand=True),
-            ],
-            spacing=8
-        ),
-        bgcolor=LOSS_RED if is_error else PROFIT_GREEN,
-        open=True,
-        duration=2500,
-        behavior=ft.SnackBarBehavior.FLOATING,
-        margin=ft.Margin.all(12)
-    )
-    page.overlay.append(sb)
-    page.update()
-
-
-def get_current_stock_price(ticker: str, fallback_price: float = 0.0) -> float:
-    """
-    야후 파이낸스에서 실시간 또는 최근 종가를 신속하게 조회합니다.
-    조회 실패 시 fallback_price를 반환합니다.
-    """
-    try:
-        import yfinance as yf
-        t = yf.Ticker(ticker)
-        fi = t.fast_info
-        p = fi.get('lastPrice') or fi.get('regularMarketPrice') or fi.get('previousClose')
-        if p is not None and float(p) > 0:
-            return round(float(p), 2)
-    except Exception as ex:
-        print(f"[{ticker}] 실시간 시세 조회 안내: {ex}")
-
-    return round(float(fallback_price), 2) if fallback_price > 0 else 142.50
-
-
-_HISTORICAL_PRICE_CACHE = {}
-
-
-def make_bug_report_mailto() -> str:
-    """
-    버그 리포트 전송을 위한 mailto URL을 생성합니다.
-    수신인: wprkfgur@hotmail.com
-    발신인: 기기 기본 이메일 계정
-    본문: 발생 상황과 증상을 작성할 수 있는 템플릿 미리 완성
-    """
-    import urllib.parse
-    recipient = "wprkfgur@hotmail.com"
-    subject = "[종종이 투자앱] 버그 리포트 및 피드백"
-    now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
-    body = f"""[버그 리포트 / 문의 사항]
-
-1. 발생 일시: {now_str}
-2. 발생 화면 / 기능: (예: 계좌 상세 일일 정산 / 백테스트 / 계좌 생성 등)
-3. 대상 종목 및 계좌명: 
-4. 문제 상황 및 구체적인 증상:
-(어떤 동작을 했을 때 어떤 오류나 이상 현상이 발생했는지 자유롭게 적어주세요)
-
-------------------------------------
-* 소중한 의견 감사합니다. 확인 후 신속히 반영하겠습니다."""
-
-    query = urllib.parse.urlencode({
-        'subject': subject,
-        'body': body
-    }, quote_via=urllib.parse.quote)
-    return f"mailto:{recipient}?{query}"
-
-
-def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: float = 0.0) -> float:
-    """
-    지정한 종목의 특정 정산 대상 날짜(target_date) 종가를 조회합니다.
-    - 로컬 SQLite DB에 저장된 시세가 있으면 네트워크 호출 없이 0.001초 만에 즉시 반환합니다.
-    - 오늘 또는 미래 날짜인 경우: 실시간 현재가(fast_info)를 조회합니다.
-    - 과거 날짜인데 DB에 없는 경우: 증분 캐싱 후 반환합니다.
-    - 조회 실패 시 fallback_price를 반환합니다.
-    """
-    if not target_date:
-        return get_current_stock_price(ticker, fallback_price)
-
-    target_clean = str(target_date).strip()[:10]
-    cache_key = (ticker.upper(), target_clean)
-    if cache_key in _HISTORICAL_PRICE_CACHE:
-        return _HISTORICAL_PRICE_CACHE[cache_key]
-
-    today_str = datetime.now().strftime('%Y-%m-%d')
-
-    # 1. 과거 날짜인 경우 로컬 SQLite DB 우선 조회 (초고속 0.001s)
-    if target_clean < today_str:
-        db_p = get_price_from_db(ticker, target_clean)
-        if db_p > 0:
-            _HISTORICAL_PRICE_CACHE[cache_key] = db_p
-            return db_p
-
-    # 2. 오늘 또는 미래 날짜인 경우 실시간 빠른 시세 조회
-    if target_clean >= today_str:
-        p = get_current_stock_price(ticker, fallback_price)
-        if p > 0:
-            _HISTORICAL_PRICE_CACHE[cache_key] = p
-            return p
-
-    # 3. DB에 누락된 과거 구간인 경우 증분 다운로드 및 로컬 캐싱
-    try:
-        dt = datetime.strptime(target_clean, '%Y-%m-%d')
-        s_date = (dt - timedelta(days=7)).strftime('%Y-%m-%d')
-        e_date = (dt + timedelta(days=7)).strftime('%Y-%m-%d')
-        df = fetch_market_data(ticker, s_date, e_date, warmup_days=10)
-        if df is not None and not df.empty:
-            df['Date_str'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
-            match = df[df['Date_str'] == target_clean]
-            if not match.empty:
-                val = round(float(match.iloc[0]['Close']), 2)
-                _HISTORICAL_PRICE_CACHE[cache_key] = val
-                return val
-            prior = df[df['Date_str'] <= target_clean]
-            if not prior.empty:
-                val = round(float(prior.iloc[-1]['Close']), 2)
-                _HISTORICAL_PRICE_CACHE[cache_key] = val
-                return val
-    except Exception as ex:
-        print(f"[{ticker}] {target_clean} 과거 종가 조회 안내: {ex}")
-
-    return get_current_stock_price(ticker, fallback_price)
-
-
-def parse_picked_date_str(val, e_data=None) -> str:
-    """
-    Flutter/Flet DatePicker에서 반환되는 DateTime 객체 또는 ISO 문자열을
-    한국 표준시(KST) 및 시스템 로컬 시간대 기준 YYYY-MM-DD 형식으로 안전하고 정확하게 변환합니다.
-    (Flutter DatePicker가 로컬 자정을 UTC로 직렬화하여 전송할 때 하루 전날로 밀리는 현상을 완벽 방지)
-    """
-    if not val and not e_data:
-        return ""
-    dt = None
-    if isinstance(val, (datetime, pd.Timestamp)):
-        dt = val
-    elif e_data:
-        try:
-            dt = datetime.fromisoformat(str(e_data).replace("Z", "+00:00"))
-        except Exception:
-            pass
-    if dt is None:
-        try:
-            dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
-        except Exception:
-            pass
-    if dt is None:
-        return str(val or e_data)[:10]
-
-    if dt.tzinfo is not None:
-        local_dt = dt.astimezone()
-    else:
-        local_dt = dt
-
-    # 안드로이드/임베디드 환경이 시스템 로컬 타임존을 못 읽어 UTC로 남아있거나
-    # 자정이 UTC 변환되어 오후/저녁(12~23시)으로 넘어온 경우 한국 표준시(KST, UTC+9) 보정
-    if local_dt.hour >= 12:
-        kst = timezone(timedelta(hours=9))
-        if dt.tzinfo is not None:
-            local_dt = dt.astimezone(kst)
-        else:
-            local_dt = (dt + timedelta(hours=12)).replace(hour=0, minute=0, second=0)
-
-    return local_dt.strftime("%Y-%m-%d")
-
-
-def compute_suggested_trades(
-    close_p: float,
-    buy_orders: list,
-    sell_orders: list,
-    unsold_lots: list = None,
-    strategy_name: str = "",
-    netting_info: dict = None
-):
-    """
-    종가(close_p)를 기준으로 LOC 매수 및 매도 체결 수량을 산출합니다.
-    - 매도:
-      미매도 슬롯(unsold_lots)이 전달된 경우:
-      1) 보유일수 >= 10영업일 (10일 만기 MOC 슬롯): 무조건 매도 체결
-      2) 목표가 도달: 종가 >= 개별 슬롯 목표가(U) - 1e-4 인 모든 슬롯 전량 매도
-      (퉁치기 슬롯을 포함하여 종가가 목표가 이상이 된 모든 슬롯이 자동 매도 체결됨)
-      슬롯 정보가 없을 때는 기존 sell_orders 목록의 종가 >= 주문단가 수량 합산.
-    - 매수:
-      1) LOC 매수 주문 중 종가 <= 주문단가인 주문들의 수량 합산
-      2) 퉁치기 슬롯(최저 목표가 슬롯)이 매도 체결되었으나 LOC 매수 주문이 0주인 경우:
-         퉁치기 상계 원리에 따라 1회분 상계 매수 수량을 기본 제안
-    """
-    calc_buy_q = 0
-    calc_sell_q = 0
-
-    target_reached_lots = []
-    min_u_lot = None
-
-    if unsold_lots:
-        for lot in unsold_lots:
-            # R 수량 확인
-            rq = lot.get('R')
-            if rq is None:
-                continue
-            try:
-                rq = int(rq)
-            except Exception:
-                continue
-            if rq <= 0 or bool(lot.get('Sold', False)):
-                continue
-
-            # 목표가 U 확인
-            u_val = lot.get('U')
-            if u_val is None or pd.isna(u_val):
-                bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
-                t_yield = 0.0275 if '종종이' in strategy_name else 0.05
-                u_val = bp * (1.0 + t_yield)
-            else:
-                u_val = float(u_val)
-
-            # 보유 일수 확인
-            h_days = int(lot.get('hold_days', 0))
-
-            is_moc = (h_days >= 10)
-            is_target_reached = (close_p >= u_val - 1e-4)
-
-            if is_moc or is_target_reached:
-                calc_sell_q += rq
-                target_reached_lots.append(lot)
-
-        valid_lots = [l for l in unsold_lots if int(l.get('R', 0)) > 0 and not bool(l.get('Sold', False))]
-        if valid_lots:
-            def _get_u(x):
-                val = x.get('U')
-                return float(val) if (val is not None and not pd.isna(val)) else 999999.0
-            min_u_lot = min(valid_lots, key=_get_u)
-    else:
-        for s in sell_orders:
-            sp = s.get('price')
-            if sp is None:
-                raw_p = str(s.get('주문단가', '0')).replace('$', '').replace(',', '').strip()
-                sp = float(raw_p) if raw_p else 0.0
-            sq = s.get('qty')
-            if sq is None:
-                raw_q = str(s.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
-                sq = int(raw_q) if raw_q else 0
-            if sp > 0 and sq > 0 and close_p >= sp - 1e-4:
-                calc_sell_q += sq
-
-    for b in buy_orders:
-        bp = b.get('price')
-        if bp is None:
-            raw_p = str(b.get('주문단가', '0')).replace('$', '').replace(',', '').strip()
-            bp = float(raw_p) if raw_p else 0.0
-        bq = b.get('qty')
-        if bq is None:
-            raw_q = str(b.get('주문수량', '0')).replace('주', '').replace(',', '').strip()
-            bq = int(raw_q) if raw_q else 0
-        if bp > 0 and bq > 0 and close_p <= bp + 1e-4:
-            calc_buy_q += bq
-
-    # 퉁치기 슬롯이 익절 체결되었는데 당일 LOC 매수 체결이 0주인 경우:
-    # 퉁치기 상계 순매수 수량을 기본 제안 수량으로 자동 설정
-    if calc_buy_q == 0 and min_u_lot is not None and min_u_lot in target_reached_lots:
-        tung_q = int(min_u_lot.get('R', 0))
-        if tung_q > 0:
-            calc_buy_q = tung_q
-
-    return calc_buy_q, calc_sell_q
-
-
-def extract_pct_str(order: dict, ref_price: float) -> str:
-    """
-    주문 정보에서 가격 변동률 문자열(예: (-17.0%), (+2.7%))을 추출하거나 계산합니다.
-    """
-    for key in ['체결조건', '비고', '호가단계', '구분']:
-        val = str(order.get(key, ''))
-        m = re.search(r'\(([+-]?\d+\.?\d*%)\)', val)
-        if m:
-            return m.group(0)
-
-    op = order.get('price')
-    if op is None:
-        try:
-            op = float(str(order.get('주문단가', '0')).replace('$', '').replace(',', '').strip())
-        except Exception:
-            op = 0.0
-    if op > 0 and ref_price > 0:
-        diff = (op - ref_price) / ref_price * 100.0
-        return f"({diff:+.1f}%)"
-    return ""
-
-
-# =====================================================================
-# =====================================================================
-# 차트 렌더링 헬퍼 (초경량 고성능 순수 벡터 SVG Base64 변환)
-# 모바일 환경에서 100% 무결점 동작하며, InteractiveViewer에서 무한 확대해도 선명합니다.
-# =====================================================================
-def render_portfolio_chart(accounts_data: list, total_portfolio_asset: float):
-    """
-    전체 계좌의 통합 자산 추이 그래프를 고해상도 순수 벡터 SVG로 생성하여 base64 URI 및 데이터 배열을 반환합니다.
-    (InteractiveViewer에서 부드럽게 좌우 이동 및 무손실 확대 가능, 롱프레스 시 수치 확인 가능)
-    """
-    try:
-        width = 650
-        height = 260
-        pad_left = 65
-        pad_right = 25
-        pad_top = 25
-        pad_bottom = 40
-        
-        chart_w = width - pad_left - pad_right
-        chart_h = height - pad_top - pad_bottom
-
-        all_series = []
-        for d in accounts_data:
-            df = d.get('df_res')
-            if df is not None and not df.empty and 'Asset' in df.columns:
-                s = df.set_index('Date')['Asset']
-                all_series.append(s)
-
-        if all_series:
-            combined_df = pd.concat(all_series, axis=1).ffill().fillna(0.0)
-            total_series = combined_df.sum(axis=1)
-            dates = [pd.to_datetime(d).strftime('%m/%d') for d in total_series.index]
-            vals = [float(v) for v in total_series.values]
-        else:
-            now = datetime.now()
-            dates = [(now - timedelta(days=4-i)).strftime('%m/%d') for i in range(5)]
-            vals = [float(total_portfolio_asset)] * 5
-
-        min_val = min(vals) if vals else 0.0
-        max_val = max(vals) if vals else 1000.0
-        if min_val == max_val:
-            min_val = max(0.0, min_val * 0.9)
-            max_val = max_val * 1.1 if max_val > 0 else 1000.0
-
-        val_range = max_val - min_val if max_val > min_val else 1.0
-        n = len(vals)
-
-        points = []
-        for i, v in enumerate(vals):
-            x = pad_left + (i / max(1, n - 1)) * chart_w
-            y = pad_top + chart_h - ((v - min_val) / val_range) * chart_h
-            points.append((x, y))
-
-        path_d = f"M {points[0][0]:.1f} {points[0][1]:.1f}"
-        for pt in points[1:]:
-            path_d += f" L {pt[0]:.1f} {pt[1]:.1f}"
-
-        fill_d = path_d + f" L {points[-1][0]:.1f} {pad_top + chart_h:.1f} L {points[0][0]:.1f} {pad_top + chart_h:.1f} Z"
-
-        grid_lines = []
-        for step in [0.0, 0.5, 1.0]:
-            gy = pad_top + chart_h * (1.0 - step)
-            gval = min_val + step * val_range
-            grid_lines.append(f'<line x1="{pad_left}" y1="{gy:.1f}" x2="{width - pad_right}" y2="{gy:.1f}" stroke="#2A344A" stroke-dasharray="3,3" stroke-width="1"/>')
-            grid_lines.append(f'<text x="{pad_left - 8}" y="{gy + 4:.1f}" fill="#94A3B8" font-size="10" text-anchor="end">${gval:,.0f}</text>')
-
-        x_labels = []
-        indices = [0, n // 2, n - 1] if n >= 3 else list(range(n))
-        for idx in sorted(list(set(indices))):
-            px = points[idx][0]
-            dt = dates[idx]
-            x_labels.append(f'<text x="{px:.1f}" y="{height - 12}" fill="#94A3B8" font-size="10" text-anchor="middle">{dt}</text>')
-
-        svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="100%">
-  <defs>
-    <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0.02"/>
-    </linearGradient>
-  </defs>
-  <rect width="{width}" height="{height}" fill="#1E2536" rx="8"/>
-  {''.join(grid_lines)}
-  <path d="{fill_d}" fill="url(#blueGrad)"/>
-  <path d="{path_d}" fill="none" stroke="#3B82F6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-  {''.join(x_labels)}
-</svg>'''
-
-        b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
-        return f"data:image/svg+xml;base64,{b64}", dates, vals
-    except Exception as ex:
-        print(f"Portfolio chart render error: {ex}")
-        return "", [], []
-
-
-def render_multi_backtest_chart(series_list: list, ticker: str):
-    """
-    복수 전략(종종이, 무한매수, 단순보유 등)의 백테스트 자산 비교 차트를 고해상도 순수 벡터 SVG로 생성합니다.
-    Returns: (chart_b64, dates, valid_series)
-    """
-    try:
-        width = 650
-        height = 260
-        pad_left = 65
-        pad_right = 25
-        pad_top = 40
-        pad_bottom = 40
-
-        chart_w = width - pad_left - pad_right
-        chart_h = height - pad_top - pad_bottom
-
-        valid_series = [s for s in series_list if s.get('vals')]
-        if not valid_series:
-            return "", [], []
-
-        # 날짜 축 (가장 긴 시리즈 기준)
-        longest_s = max(valid_series, key=lambda s: len(s.get('dates', [])))
-        dates = longest_s.get('dates', [])
-        n = len(dates)
-
-        # 전체 전략의 min, max 산출
-        all_vals = []
-        for s in valid_series:
-            all_vals.extend(s['vals'])
-
-        min_val = min(all_vals) if all_vals else 0.0
-        max_val = max(all_vals) if all_vals else 1000.0
-        if min_val == max_val:
-            min_val = max(0.0, min_val * 0.9)
-            max_val = max_val * 1.1 if max_val > 0 else 1000.0
-
-        val_range = max_val - min_val if max_val > min_val else 1.0
-
-        # Y축 격자선
-        grid_lines = []
-        for step in [0.0, 0.5, 1.0]:
-            gy = pad_top + chart_h * (1.0 - step)
-            gval = min_val + step * val_range
-            grid_lines.append(f'<line x1="{pad_left}" y1="{gy:.1f}" x2="{width - pad_right}" y2="{gy:.1f}" stroke="#2A344A" stroke-dasharray="3,3" stroke-width="1"/>')
-            grid_lines.append(f'<text x="{pad_left - 8}" y="{gy + 4:.1f}" fill="#94A3B8" font-size="10" text-anchor="end">${gval:,.0f}</text>')
-
-        # 각 전략별 선 그리기
-        paths_svg = []
-        for idx, s in enumerate(valid_series):
-            vals = s['vals']
-            col = s.get('color', '#10B981')
-            is_dash = s.get('dash', False)
-            m = len(vals)
-            if m == 0:
-                continue
-
-            pts = []
-            for i, v in enumerate(vals):
-                x = pad_left + (i / max(1, m - 1)) * chart_w
-                y = pad_top + chart_h - ((v - min_val) / val_range) * chart_h
-                pts.append((x, y))
-
-            path_d = f"M {pts[0][0]:.1f} {pts[0][1]:.1f}"
-            for pt in pts[1:]:
-                path_d += f" L {pt[0]:.1f} {pt[1]:.1f}"
-
-            dash_attr = 'stroke-dasharray="4,4"' if is_dash else ''
-            stroke_w = "2.0" if is_dash else "2.5"
-
-            fill_svg = ""
-            if len(valid_series) == 1 and not is_dash:
-                fill_d = path_d + f" L {pts[-1][0]:.1f} {pad_top + chart_h:.1f} L {pts[0][0]:.1f} {pad_top + chart_h:.1f} Z"
-                fill_svg = f'<path d="{fill_d}" fill="{col}" fill-opacity="0.18"/>'
-
-            paths_svg.append(f'{fill_svg}<path d="{path_d}" fill="none" stroke="{col}" stroke-width="{stroke_w}" {dash_attr} stroke-linecap="round" stroke-linejoin="round"/>')
-
-        # X축 날짜 레이블
-        x_labels = []
-        indices = [0, n // 4, n // 2, (3 * n) // 4, n - 1] if n >= 5 else list(range(n))
-        for i_idx in sorted(list(set(indices))):
-            if i_idx < n:
-                px = pad_left + (i_idx / max(1, n - 1)) * chart_w
-                dt_str = dates[i_idx]
-                x_labels.append(f'<text x="{px:.1f}" y="{height - 12}" fill="#94A3B8" font-size="10" text-anchor="middle">{dt_str}</text>')
-
-        # 상단 범례 (Legend)
-        legend_items = []
-        cur_x = pad_left + 10
-        for s in valid_series:
-            col = s.get('color', '#10B981')
-            name = s.get('name', '')
-            is_dash = s.get('dash', False)
-            dash_attr = 'stroke-dasharray="3,3"' if is_dash else ''
-            legend_items.append(f'''
-            <g transform="translate({cur_x}, 18)">
-              <line x1="0" y1="0" x2="16" y2="0" stroke="{col}" stroke-width="2.5" {dash_attr}/>
-              <circle cx="8" cy="0" r="3" fill="{col}"/>
-              <text x="22" y="4" fill="#E2E8F0" font-size="10" font-weight="bold">{name}</text>
-            </g>
-            ''')
-            cur_x += len(name) * 8 + 65
-
-        svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="100%">
-  <rect width="{width}" height="{height}" fill="#1E2536" rx="8"/>
-  {''.join(grid_lines)}
-  {''.join(paths_svg)}
-  {''.join(legend_items)}
-  {''.join(x_labels)}
-</svg>'''
-
-        b64 = base64.b64encode(svg.encode('utf-8')).decode('utf-8')
-        return f"data:image/svg+xml;base64,{b64}", dates, valid_series
-    except Exception as ex:
-        print(f"Multi-chart render error: {ex}")
-        return "", [], []
-
-
-def render_backtest_chart(df_strat: pd.DataFrame, df_bnh: pd.DataFrame, strat_name: str, ticker: str) -> str:
-    """
-    단일 전략 하위 호환성 래퍼 함수
-    """
-    series_list = []
-    if df_strat is not None and not df_strat.empty and 'Asset' in df_strat.columns:
-        series_list.append({
-            'name': strat_name,
-            'color': '#10B981',
-            'dash': False,
-            'dates': [pd.to_datetime(d).strftime('%y/%m' if len(df_strat) > 365 else '%m/%d') for d in df_strat['Date']],
-            'vals': df_strat['Asset'].values.tolist()
-        })
-    if df_bnh is not None and not df_bnh.empty and 'Asset' in df_bnh.columns:
-        series_list.append({
-            'name': f"{ticker} 단순보유",
-            'color': '#94A3B8',
-            'dash': True,
-            'dates': [pd.to_datetime(d).strftime('%y/%m' if len(df_bnh) > 365 else '%m/%d') for d in df_bnh['Date']],
-            'vals': df_bnh['Asset'].values.tolist()
-        })
-    chart_b64, _, _ = render_multi_backtest_chart(series_list, ticker)
-    return chart_b64
-
-
-# =====================================================================
-# 메인 애플리케이션 클래스
-# =====================================================================
 class MobileTradingApp:
     def __init__(self, page: ft.Page):
         self.page = page
@@ -1486,7 +922,6 @@ class MobileTradingApp:
             cash = dtl.get('current_cash', seed)
             hold = dtl.get('current_hold', 0)
             ak_val = dtl.get('ak_val', seed * 0.05)
-            op_state = dtl.get('operational_state', 'WAITING_FOR_FILL')
             mode = dtl.get('mode', 'Normal')
 
             r_color = PROFIT_GREEN if ret_pct >= 0 else LOSS_RED
@@ -1588,7 +1023,6 @@ class MobileTradingApp:
         name = acc.get('name', '')
         ticker = acc.get('ticker', 'SOXL')
         strat = acc.get('strategy', '종종이 기본전략')
-        seed = acc.get('initial_seed', 0.0)
         curr_d = dtl.get('current_date', '')
         target_date = dtl.get('target_order_date', '')
 
@@ -1602,7 +1036,6 @@ class MobileTradingApp:
         budget = dtl.get('daily_budget', 0.0)
         mode = dtl.get('mode', 'Normal')
         latest_price = dtl.get('current_price', 0.0)
-        op_state = dtl.get('operational_state', 'WAITING_FOR_FILL')
 
         # -------------------------------------------------------------
         # 1. 계좌 기본 정보 & KPI 카드
@@ -2678,7 +2111,7 @@ class MobileTradingApp:
 
                     # 2. 전략별 시뮬레이션
                     loading_icon_hourglass.name = ft.Icons.HOURGLASS_BOTTOM
-                    loading_status_text.value = f"[2/3] ⚙️ 전략별 매매 & 복리 시뮬레이션 연산 중..."
+                    loading_status_text.value = "[2/3] ⚙️ 전략별 매매 & 복리 시뮬레이션 연산 중..."
                     loading_sub_text.value = f"총 {len(selected_strats)}개 전략의 조각 매수/익절/시간손절을 계산 중입니다."
                     self.page.update()
 
@@ -2714,7 +2147,7 @@ class MobileTradingApp:
 
                     # 3. 차트 렌더링
                     loading_icon_hourglass.name = ft.Icons.HOURGLASS_FULL
-                    loading_status_text.value = f"[3/3] 📊 고해상도 성과 차트 및 지표 렌더링 중..."
+                    loading_status_text.value = "[3/3] 📊 고해상도 성과 차트 및 지표 렌더링 중..."
                     loading_sub_text.value = "결과 대시보드를 생성하고 있습니다."
                     self.page.update()
 
@@ -3192,7 +2625,6 @@ class MobileTradingApp:
     # TAB 3: ⚙ 설정 (CSV 내보내기 & 시스템 환경 설정)
     # =================================================================
     def _build_settings_tab(self):
-        global EXCHANGE_RATE
 
         storage_base = os.environ.get("FLET_APP_STORAGE_DATA") or CURRENT_DIR
         exports_dir = os.path.join(storage_base, "exports")
@@ -4418,7 +3850,7 @@ class MobileTradingApp:
                 show_toast(self.page, "시드 및 위기준비금 숫자를 확인해주세요.", is_error=True)
                 return
 
-            new_acc = self.am.add_account(
+            self.am.add_account(
                 name=name,
                 strategy=strat_val,
                 ticker=ticker,

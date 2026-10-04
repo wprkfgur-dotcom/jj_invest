@@ -98,7 +98,6 @@ def publish_release(tag: str = DEFAULT_TAG, apk_path: str = DEFAULT_APK_PATH, ti
         else:
             raise
 
-    release_id = release_data["id"]
     upload_url = release_data["upload_url"].split("{")[0]
 
     # 2. 기존 동일 이름 에셋이 있으면 삭제
