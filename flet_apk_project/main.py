@@ -4027,8 +4027,9 @@ class MobileTradingApp:
                                 ft.TextButton("확인 (닫기)", on_click=lambda _: self.page.pop_dialog()),
                                 ft.TextButton(
                                     "강제 재다운로드",
+                                    url=download_target_url,
                                     style=ft.ButtonStyle(color=TEXT_MUTED),
-                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url), show_toast(self.page, "GitHub에서 최신 APK 다운로드를 시작합니다..."))
+                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url, self.page), show_toast(self.page, "GitHub에서 최신 APK 다운로드를 시작합니다..."))
                                 )
                             ],
                             actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4083,8 +4084,9 @@ class MobileTradingApp:
                                 ft.TextButton("나중에", on_click=lambda _: self.page.pop_dialog()),
                                 ft.FilledButton(
                                     "🚀 지금 업데이트 다운로드",
+                                    url=download_target_url,
                                     style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
-                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url), show_toast(self.page, "GitHub에서 최신 APK 다운로드를 시작합니다..."))
+                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url, self.page), show_toast(self.page, "GitHub에서 최신 APK 다운로드를 시작합니다..."))
                                 )
                             ],
                             actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4116,8 +4118,9 @@ class MobileTradingApp:
                             ft.TextButton("닫기", on_click=lambda _: self.page.pop_dialog()),
                             ft.FilledButton(
                                 "저장소 열기",
+                                url=info.get('download_url', DEFAULT_RELEASES_WEB_URL),
                                 style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
-                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(info.get('download_url', DEFAULT_RELEASES_WEB_URL)))
+                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(info.get('download_url', DEFAULT_RELEASES_WEB_URL), self.page))
                             )
                         ],
                         actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4149,8 +4152,9 @@ class MobileTradingApp:
                             ft.TextButton("닫기", on_click=lambda _: self.page.pop_dialog()),
                             ft.FilledButton(
                                 "직접 다운로드 시도",
+                                url=download_target_url,
                                 style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
-                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
+                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url, self.page), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
                             )
                         ],
                         actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,

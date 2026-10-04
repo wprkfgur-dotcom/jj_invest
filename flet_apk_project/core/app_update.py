@@ -344,15 +344,22 @@ def check_remote_version_info(url: str = DEFAULT_UPDATE_CHANNEL_URL, timeout: in
         }
 
 
-def trigger_apk_download(download_url: str):
+def trigger_apk_download(download_url: str, page=None):
     """
-    안드로이드 OS 브라우저 또는 기본 웹브라우저로 APK 직링크 다운로드를 트리거합니다.
+    APK 직링크 다운로드를 트리거합니다.
+    Flet Page가 전달되면 Flet의 네이티브 UrlLauncher 서비스를 호출하고,
+    그 외 환경에서는 시스템 기본 웹브라우저를 호출합니다.
     """
-    try:
-        subprocess.Popen(["am", "start", "-a", "android.intent.action.VIEW", "-d", download_url])
-    except Exception:
+    if page is not None:
         try:
-            import webbrowser
-            webbrowser.open(download_url)
+            from flet.controls.services.url_launcher import UrlLauncher
+            page.run_task(UrlLauncher().launch_url, download_url)
+            return
         except Exception as e:
-            print(f"[AppUpdate] 다운로드 실행 실패: {e}")
+            print(f"[AppUpdate] Page UrlLauncher 호출 실패: {e}")
+
+    try:
+        import webbrowser
+        webbrowser.open(download_url)
+    except Exception as e:
+        print(f"[AppUpdate] 브라우저 열기 실패: {e}")
