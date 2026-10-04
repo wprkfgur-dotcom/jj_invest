@@ -18,7 +18,7 @@ if sys.stdout.encoding != 'utf-8':
 
 REPO = "wprkfgur-dotcom/jj_invest"
 DEFAULT_TAG = "v2.0.0"
-DEFAULT_APK_PATH = r"C:\ai_development\JongJongTrader_ARM64.apk"
+DEFAULT_APK_PATH = r"C:\ai_development\dist\JongJongTrader_ARM64.apk"
 
 
 def get_github_token() -> str:

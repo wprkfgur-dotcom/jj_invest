@@ -48,14 +48,10 @@ if ($foundApk -and (Test-Path $foundApk)) {
         New-Item -ItemType Directory -Path "C:\ai_development\dist" -Force | Out-Null
     }
 
-    Copy-Item -Path $foundApk -Destination "C:\ai_development\JongJongTrader_ARM64.apk" -Force
-    Copy-Item -Path $foundApk -Destination "C:\ai_development\JongJongTrader_Mobile.apk" -Force
     Copy-Item -Path $foundApk -Destination "C:\ai_development\dist\JongJongTrader_ARM64.apk" -Force
 
     Write-Host "=========================================="
-    Write-Host "Deployment files generated successfully:"
-    Write-Host "  - C:\ai_development\JongJongTrader_ARM64.apk ($sizeMb MB)"
-    Write-Host "  - C:\ai_development\JongJongTrader_Mobile.apk ($sizeMb MB)"
+    Write-Host "Deployment file generated successfully:"
     Write-Host "  - C:\ai_development\dist\JongJongTrader_ARM64.apk ($sizeMb MB)"
     Write-Host "=========================================="
 } else {
