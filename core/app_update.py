@@ -5,7 +5,6 @@ import os
 import sys
 import re
 import json
-import subprocess
 import email.utils
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Tuple

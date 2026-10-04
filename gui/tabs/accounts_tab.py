@@ -4,7 +4,7 @@
 세금 납부를 위한 자산 인출 및 추가 입금, 당일 LOC 주문표, 매매 기록을 종합 제공합니다.
 """
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, filedialog
+from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 import pandas as pd
 

@@ -4,9 +4,8 @@
 불필요한 자전거래(스스로 매수/매도 동시 체결)를 사전에 100% 상계(퉁치기)하고
 실제 거래가 필요한 순주문(Net Orders)만 산출합니다.
 """
-import math
 from typing import List, Dict, Any
-from strategies.jongjong import safe_round4, round_down, round_up, excel_round
+from strategies.jongjong import safe_round4, round_down, excel_round
 
 
 def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]], 

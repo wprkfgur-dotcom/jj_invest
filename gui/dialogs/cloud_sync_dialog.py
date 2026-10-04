@@ -4,7 +4,6 @@ Google Apps Script Web App 연동을 통해 멀티 디바이스(폰, 태블릿, 
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-import threading
 
 from gui.theme import COLORS, FONTS
 from core.cloud_sync import (

@@ -5,7 +5,6 @@
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
-import pandas as pd
 import platform
 
 # 윈도우 한글 폰트(맑은 고딕) 및 마이너스 부호 깨짐 방지 설정

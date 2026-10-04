@@ -10,12 +10,11 @@ import json
 import uuid
 from datetime import datetime
 import pandas as pd
-import numpy as np
 
-from strategies.jongjong import JongJongStrategy, safe_round4, round_down, round_up
+from strategies.jongjong import JongJongStrategy, round_up
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from gui.order_netting import calculate_order_netting, generate_jongjong_orders
-from core.market_calendar import get_next_trading_day, get_prev_trading_day, is_us_trading_day, parse_date
+from core.market_calendar import get_next_trading_day, parse_date
 
 if os.environ.get("FLET_APP_STORAGE_DATA"):
     # Flet 모바일 (Android/iOS) 전용 영구 저장소 디렉터리

@@ -3,7 +3,7 @@
 종종이 및 무한매수법 대시보드의 메인 프레임과 탭 컨테이너를 관리합니다.
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import pandas as pd
 from datetime import datetime
 

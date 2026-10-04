@@ -2,13 +2,9 @@
 주문 생성 및 포트폴리오 상태 연산 엔진 (Order Engine)
 종종이 전략 및 무한매수법 v4.0의 최근 매매 내역과 오늘자 LOC 주문표를 산출합니다.
 """
-import math
-import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
 
-from core.data import fetch_market_data
-from strategies.jongjong import JongJongStrategy, safe_round4, round_down, round_up, excel_round
+from strategies.jongjong import JongJongStrategy, safe_round4, round_down, round_up
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 
 

@@ -3,14 +3,10 @@
 다양한 전략(종종이 기본전략, 무한매수법 v4.0, 단순보유)의 백테스트를 실행하고
 성과 비교 테이블 및 고해상도 인터랙티브 차트를 화면에 직접 렌더링합니다.
 """
-import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
-import pandas as pd
-import numpy as np
 
 import platform
-import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.ticker as ticker
@@ -22,7 +18,7 @@ if platform.system() == 'Windows':
 plt.rcParams['axes.unicode_minus'] = False
 
 from gui.theme import COLORS, FONTS
-from core.metrics import build_comparison_table, calculate_yearly_stats
+from core.metrics import build_comparison_table
 from strategies import JongJongStrategy, InfiniteBuyingV4Strategy, BuyAndHoldStrategy
 
 
@@ -172,7 +168,8 @@ class BacktestTab(ttk.Frame):
             self.after(0, lambda: self._update_results(results_dict, ticker_symbol))
 
         except Exception as e:
-            self.after(0, lambda: messagebox.showerror("백테스트 오류", f"오류 발생:\n{e}"))
+            err_msg = str(e)
+            self.after(0, lambda: messagebox.showerror("백테스트 오류", f"오류 발생:\n{err_msg}"))
             self.after(0, lambda: self.lbl_status.config(text="오류 발생", foreground=COLORS['accent_red']))
         finally:
             self.after(0, lambda: self.btn_run.config(state='normal'))

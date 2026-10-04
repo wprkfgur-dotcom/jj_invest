@@ -32,7 +32,6 @@ class BaseStrategy(ABC):
         - Asset: 총자산 가치 (Cash + Close * Hold, $)
         - DD: 누적 고점 대비 낙폭 (비율, 예: -0.15)
         """
-        pass
 
     @staticmethod
     def compute_drawdown(asset_series: pd.Series, initial_capital: float) -> pd.Series:

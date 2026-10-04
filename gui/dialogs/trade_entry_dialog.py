@@ -4,7 +4,7 @@
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Dict, Any, Callable
+from typing import Callable
 
 from gui.theme import COLORS, FONTS
 

@@ -2,11 +2,10 @@
 매매 기록 내역 탭 (Trade Log Tab)
 선택한 전략 및 기간 동안 발생한 과거 일별 매매 기록 및 포트폴리오 변화를 상세 조회합니다.
 """
-import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import pandas as pd
 
-from gui.theme import COLORS, FONTS
+from gui.theme import FONTS
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 

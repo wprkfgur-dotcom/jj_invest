@@ -66,3 +66,9 @@ scratch/
 scratch/test_*.csv
 
 
+
+# flet_apk_project 내 동기화 복사본 (sync_app.py가 루트 소스로부터 생성)
+flet_apk_project/core/
+flet_apk_project/gui/
+flet_apk_project/strategies/
+flet_apk_project/main.py

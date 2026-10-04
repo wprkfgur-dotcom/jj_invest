@@ -2,10 +2,7 @@
 오늘 주문 가이드 탭 (Today's Order Tab)
 선택한 전략 및 종목에 따라 오늘 밤 걸어야 하는 LOC 매수/매도 주문표를 시각화합니다.
 """
-import tkinter as tk
 from tkinter import ttk, messagebox
-import pandas as pd
-from datetime import datetime
 
 from gui.theme import COLORS, FONTS
 from gui.order_engine import get_jongjong_today_orders, get_infinite_buying_today_orders

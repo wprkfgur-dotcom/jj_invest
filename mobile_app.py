@@ -11,14 +11,12 @@
 """
 import sys
 import os
-import io
 import base64
 import subprocess
 import re
 import threading
 from datetime import datetime, timedelta, timezone
 import pandas as pd
-import numpy as np
 
 # UTF-8 출력 보장
 if sys.platform == "win32":
@@ -46,9 +44,8 @@ from core.cloud_sync import (
     sync_local_with_drive, get_gas_script_code
 )
 from core.app_update import (
-    APP_VERSION, APP_BUILD_NAME, APP_BUILD_DATE_STR, get_update_config, save_update_config,
-    parse_download_url, extract_github_repo,
-    DEFAULT_UPDATE_CHANNEL_URL, DEFAULT_DIRECT_DOWNLOAD_URL, DEFAULT_RELEASES_WEB_URL,
+    APP_VERSION, APP_BUILD_DATE_STR, get_update_config, save_update_config, parse_download_url,
+    DEFAULT_UPDATE_CHANNEL_URL, DEFAULT_RELEASES_WEB_URL,
     check_remote_version_info, trigger_apk_download
 )
 
@@ -3499,7 +3496,7 @@ class MobileTradingApp:
                     try:
                         if os.path.exists(self.am.filepath):
                             with open(self.am.filepath, 'r', encoding='utf-8') as rf:
-                                with open(os.path.join(DATA_DIR, "accounts.backup.json"), 'w', encoding='utf-8') as wf:
+                                with open(os.path.join(os.path.dirname(self.am.filepath), "accounts.backup.json"), 'w', encoding='utf-8') as wf:
                                     wf.write(rf.read())
                     except Exception:
                         pass
