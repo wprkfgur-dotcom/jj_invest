@@ -47,8 +47,8 @@ from core.cloud_sync import (
 )
 from core.app_update import (
     APP_VERSION, APP_BUILD_NAME, APP_BUILD_DATE_STR, get_update_config, save_update_config,
-    parse_gdrive_download_url, extract_gdrive_file_id,
-    DEFAULT_APK_DRIVE_URL, DEFAULT_DIRECT_DOWNLOAD_URL,
+    parse_download_url, extract_github_repo,
+    DEFAULT_UPDATE_CHANNEL_URL, DEFAULT_DIRECT_DOWNLOAD_URL, DEFAULT_RELEASES_WEB_URL,
     check_remote_version_info, trigger_apk_download
 )
 
@@ -3896,14 +3896,16 @@ class MobileTradingApp:
             )
         )
 
-        # 5-2. 버전 확인 및 구글 드라이브 원클릭 자동 업데이트 카드
+        # 5-2. 버전 확인 및 GitHub Releases 원클릭 자동 업데이트 카드
         update_cfg = get_update_config()
-        saved_drive_url = update_cfg.get("apk_drive_url") or DEFAULT_APK_DRIVE_URL
+        saved_update_url = update_cfg.get("apk_update_url") or update_cfg.get("apk_drive_url") or DEFAULT_UPDATE_CHANNEL_URL
+        if "drive.google.com" in str(saved_update_url):
+            saved_update_url = DEFAULT_UPDATE_CHANNEL_URL
 
-        gdrive_url_field = ft.TextField(
-            label="배포 구글 드라이브 링크",
-            value=saved_drive_url,
-            hint_text=DEFAULT_APK_DRIVE_URL,
+        update_url_field = ft.TextField(
+            label="배포 GitHub 저장소 / 채널 링크",
+            value=saved_update_url,
+            hint_text=DEFAULT_UPDATE_CHANNEL_URL,
             label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
@@ -3919,33 +3921,28 @@ class MobileTradingApp:
             color=TEXT_MUTED
         )
 
-        initial_download_url = parse_gdrive_download_url(saved_drive_url)
-
         def handle_save_update_url(e):
-            url_val = gdrive_url_field.value.strip() or DEFAULT_APK_DRIVE_URL
-            gdrive_url_field.value = url_val
+            url_val = update_url_field.value.strip() or DEFAULT_UPDATE_CHANNEL_URL
+            update_url_field.value = url_val
             cfg = get_update_config()
-            cfg["apk_drive_url"] = url_val
+            cfg["apk_update_url"] = url_val
             save_update_config(cfg)
-            show_toast(self.page, "구글 드라이브 링크가 저장되었습니다.")
-            update_status_text.value = f"현재 버전: v{APP_VERSION} • 링크 연동 완료"
+            show_toast(self.page, "업데이트 채널 링크가 저장되었습니다.")
+            update_status_text.value = f"현재 버전: v{APP_VERSION} • GitHub 채널 연동 완료"
             self.page.update()
 
         def handle_reset_update_url(e):
-            gdrive_url_field.value = DEFAULT_APK_DRIVE_URL
+            update_url_field.value = DEFAULT_UPDATE_CHANNEL_URL
             cfg = get_update_config()
-            cfg["apk_drive_url"] = DEFAULT_APK_DRIVE_URL
+            cfg["apk_update_url"] = DEFAULT_UPDATE_CHANNEL_URL
             save_update_config(cfg)
-            show_toast(self.page, "기본 구글 드라이브 링크로 초기화되었습니다.")
-            update_status_text.value = f"현재 버전: v{APP_VERSION} • 기본 링크 연결됨"
+            show_toast(self.page, "기본 GitHub 배포 채널로 초기화되었습니다.")
+            update_status_text.value = f"현재 버전: v{APP_VERSION} • GitHub 기본 채널 연결됨"
             self.page.update()
 
         def handle_check_and_update(e):
-            url_val = gdrive_url_field.value.strip() or DEFAULT_APK_DRIVE_URL
-            download_url = parse_gdrive_download_url(url_val)
-            if not download_url:
-                show_toast(self.page, "유효한 구글 드라이브 링크가 아닙니다.", is_error=True)
-                return
+            url_val = update_url_field.value.strip() or DEFAULT_UPDATE_CHANNEL_URL
+            download_fallback_url = parse_download_url(url_val)
 
             update_btn.disabled = True
             update_btn.content = ft.Row([
@@ -3963,16 +3960,55 @@ class MobileTradingApp:
                 ], alignment=ft.MainAxisAlignment.CENTER, spacing=8)
                 update_btn.update()
 
+                download_target_url = info.get("download_url") or download_fallback_url
+
                 if info.get("status") == "success":
                     cfg = get_update_config()
-                    cfg["apk_drive_url"] = url_val
+                    cfg["apk_update_url"] = url_val
                     cfg["last_check_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
                     save_update_config(cfg)
-                    update_status_text.value = f"설치 버전: v{APP_VERSION} • 최근 확인: {cfg['last_check_time']} (정상 연동)"
+                    update_status_text.value = f"설치 버전: v{APP_VERSION} • 최근 확인: {cfg['last_check_time']} (GitHub 연동)"
                     update_status_text.update()
 
+                    notes_preview = info.get("release_notes", "")
+                    notes_ctrl = None
+                    if notes_preview:
+                        clean_notes = notes_preview.replace("#", "").strip()[:180]
+                        notes_ctrl = ft.Container(
+                            padding=8,
+                            bgcolor=ft.Colors.with_opacity(0.08, ACCENT_BLUE),
+                            border_radius=6,
+                            content=ft.Text(f"📋 업데이트 요약:\n{clean_notes}...", size=10, color=TEXT_SECONDARY)
+                        )
+
                     if not info.get("is_newer"):
-                        # 1. 이미 최신 버전인 경우 (다운로드 방지 및 팝업 안내)
+                        # 1. 이미 최신 버전인 경우 (불필요한 대용량 다운로드 방지)
+                        dialog_items = [
+                            ft.Container(
+                                padding=12,
+                                bgcolor=ft.Colors.with_opacity(0.12, PROFIT_GREEN),
+                                border=ft.Border.all(1, ft.Colors.with_opacity(0.3, PROFIT_GREEN)),
+                                border_radius=8,
+                                content=ft.Text(
+                                    f"현재 이미 가장 최신 버전(v{APP_VERSION})을 사용하고 계십니다!\n새 버전이 없어 불필요한 데이터 다운로드를 방지했습니다.",
+                                    size=12,
+                                    weight=ft.FontWeight.W_500,
+                                    color=PROFIT_GREEN
+                                )
+                            ),
+                            ft.Container(height=4),
+                            ft.Row([ft.Text("• 현재 설치 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{APP_VERSION} (최신)", size=11, color=TEXT_PRIMARY, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• 릴리즈 제목:", size=11, color=TEXT_MUTED), ft.Text(str(info.get('release_name', '최신 릴리즈'))[:22], size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• GitHub 배포일:", size=11, color=TEXT_MUTED), ft.Text(info.get('remote_date_str', APP_BUILD_DATE_STR), size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• 배포 파일 크기:", size=11, color=TEXT_MUTED), ft.Text(f"{info.get('remote_size_mb', 0)} MB", size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        ]
+                        if notes_ctrl:
+                            dialog_items.append(notes_ctrl)
+                        dialog_items.extend([
+                            ft.Divider(color=BORDER_COLOR, height=1),
+                            ft.Text("※ 앱을 초기화하거나 재설치할 목적이 아니라면 다시 다운로드하실 필요가 없습니다.", size=10, color=TEXT_MUTED)
+                        ])
+
                         dlg = ft.AlertDialog(
                             modal=True,
                             title=ft.Row([
@@ -3982,26 +4018,7 @@ class MobileTradingApp:
                             content=ft.Container(
                                 width=360,
                                 content=ft.Column(
-                                    controls=[
-                                        ft.Container(
-                                            padding=12,
-                                            bgcolor=ft.Colors.with_opacity(0.12, PROFIT_GREEN),
-                                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, PROFIT_GREEN)),
-                                            border_radius=8,
-                                            content=ft.Text(
-                                                f"현재 이미 가장 최신 버전(v{APP_VERSION})을 사용하고 계십니다!\n새 버전이 없어 불필요한 다운로드를 진행하지 않습니다.",
-                                                size=12,
-                                                weight=ft.FontWeight.W_500,
-                                                color=PROFIT_GREEN
-                                            )
-                                        ),
-                                        ft.Container(height=4),
-                                        ft.Row([ft.Text("• 현재 설치 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{APP_VERSION} (최신)", size=11, color=TEXT_PRIMARY, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Row([ft.Text("• 드라이브 배포일:", size=11, color=TEXT_MUTED), ft.Text(info.get('remote_date_str', APP_BUILD_DATE_STR), size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Row([ft.Text("• 배포 파일 크기:", size=11, color=TEXT_MUTED), ft.Text(f"{info.get('remote_size_mb', 0)} MB", size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Divider(color=BORDER_COLOR, height=1),
-                                        ft.Text("※ 앱을 초기화하거나 재설치할 목적이 아니라면 다시 다운로드하실 필요가 없습니다.", size=10, color=TEXT_MUTED)
-                                    ],
+                                    controls=dialog_items,
                                     spacing=6,
                                     tight=True
                                 )
@@ -4011,7 +4028,7 @@ class MobileTradingApp:
                                 ft.TextButton(
                                     "강제 재다운로드",
                                     style=ft.ButtonStyle(color=TEXT_MUTED),
-                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_url), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
+                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url), show_toast(self.page, "GitHub에서 최신 APK 다운로드를 시작합니다..."))
                                 )
                             ],
                             actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4021,6 +4038,33 @@ class MobileTradingApp:
                         self.page.show_dialog(dlg)
                     else:
                         # 2. 새로운 최신 버전이 있는 경우 (다운로드 확인 팝업)
+                        dialog_items = [
+                            ft.Container(
+                                padding=12,
+                                bgcolor=ft.Colors.with_opacity(0.12, ACCENT_BLUE),
+                                border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ACCENT_BLUE)),
+                                border_radius=8,
+                                content=ft.Text(
+                                    "GitHub Releases에 새로운 배포 버전이 등록되었습니다!\n지금 바로 업데이트하시겠습니까?",
+                                    size=12,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=ACCENT_BLUE
+                                )
+                            ),
+                            ft.Container(height=4),
+                            ft.Row([ft.Text("• 현재 설치 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{APP_VERSION}", size=11, color=TEXT_SECONDARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• 최신 배포 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{info.get('remote_version') or '최신'}", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• 릴리즈 제목:", size=11, color=TEXT_MUTED), ft.Text(str(info.get('release_name', '최신 릴리즈'))[:22], size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• 배포 일시:", size=11, color=TEXT_MUTED), ft.Text(info.get('remote_date_str', '최신'), size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([ft.Text("• 파일 크기:", size=11, color=TEXT_MUTED), ft.Text(f"{info.get('remote_size_mb', 0)} MB", size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                        ]
+                        if notes_ctrl:
+                            dialog_items.append(notes_ctrl)
+                        dialog_items.extend([
+                            ft.Divider(color=BORDER_COLOR, height=1),
+                            ft.Text("※ 다운로드 완료 후 상단 알림을 터치하면 기존 계좌 데이터를 유지한 채 바로 업데이트됩니다.", size=10, color=TEXT_MUTED)
+                        ])
+
                         dlg = ft.AlertDialog(
                             modal=True,
                             title=ft.Row([
@@ -4030,27 +4074,7 @@ class MobileTradingApp:
                             content=ft.Container(
                                 width=360,
                                 content=ft.Column(
-                                    controls=[
-                                        ft.Container(
-                                            padding=12,
-                                            bgcolor=ft.Colors.with_opacity(0.12, ACCENT_BLUE),
-                                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ACCENT_BLUE)),
-                                            border_radius=8,
-                                            content=ft.Text(
-                                                "구글 드라이브에 새로운 최신 배포본이 등록되었습니다!\n지금 바로 업데이트하시겠습니까?",
-                                                size=12,
-                                                weight=ft.FontWeight.BOLD,
-                                                color=ACCENT_BLUE
-                                            )
-                                        ),
-                                        ft.Container(height=4),
-                                        ft.Row([ft.Text("• 현재 설치 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{APP_VERSION}", size=11, color=TEXT_SECONDARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Row([ft.Text("• 최신 배포 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{info.get('remote_version') or '최신'}", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Row([ft.Text("• 배포 일시:", size=11, color=TEXT_MUTED), ft.Text(info.get('remote_date_str', '최신'), size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Row([ft.Text("• 파일 크기:", size=11, color=TEXT_MUTED), ft.Text(f"{info.get('remote_size_mb', 0)} MB", size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                                        ft.Divider(color=BORDER_COLOR, height=1),
-                                        ft.Text("※ 다운로드 완료 후 상단 알림을 터치하면 기존 계좌 데이터를 유지한 채 바로 업데이트됩니다.", size=10, color=TEXT_MUTED)
-                                    ],
+                                    controls=dialog_items,
                                     spacing=6,
                                     tight=True
                                 )
@@ -4060,7 +4084,7 @@ class MobileTradingApp:
                                 ft.FilledButton(
                                     "🚀 지금 업데이트 다운로드",
                                     style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
-                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_url), show_toast(self.page, "구글 드라이브에서 최신 APK 다운로드를 시작합니다..."))
+                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url), show_toast(self.page, "GitHub에서 최신 APK 다운로드를 시작합니다..."))
                                 )
                             ],
                             actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4068,8 +4092,41 @@ class MobileTradingApp:
                             shape=ft.RoundedRectangleBorder(radius=14)
                         )
                         self.page.show_dialog(dlg)
+                elif info.get("status") == "no_release":
+                    # 3. 릴리즈가 등록되지 않은 경우
+                    dlg = ft.AlertDialog(
+                        modal=True,
+                        title=ft.Row([
+                            ft.Icon(ft.Icons.INFO_OUTLINE_ROUNDED, color=ACCENT_BLUE, size=22),
+                            ft.Text("GitHub 릴리즈 미등록", size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                        ], spacing=8),
+                        content=ft.Container(
+                            width=360,
+                            content=ft.Column(
+                                controls=[
+                                    ft.Text(info.get("message", "GitHub 저장소에 등록된 릴리즈가 없습니다."), size=12, color=TEXT_SECONDARY),
+                                    ft.Container(height=4),
+                                    ft.Text(f"저장소: {info.get('download_url')}", size=11, color=TEXT_MUTED)
+                                ],
+                                spacing=6,
+                                tight=True
+                            )
+                        ),
+                        actions=[
+                            ft.TextButton("닫기", on_click=lambda _: self.page.pop_dialog()),
+                            ft.FilledButton(
+                                "저장소 열기",
+                                style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
+                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(info.get('download_url', DEFAULT_RELEASES_WEB_URL)))
+                            )
+                        ],
+                        actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        bgcolor=SURFACE_CARD,
+                        shape=ft.RoundedRectangleBorder(radius=14)
+                    )
+                    self.page.show_dialog(dlg)
                 else:
-                    # 3. 네트워크 에러 등으로 확인 실패한 경우
+                    # 4. 네트워크 에러 등으로 확인 실패한 경우
                     dlg = ft.AlertDialog(
                         modal=True,
                         title=ft.Row([
@@ -4080,9 +4137,9 @@ class MobileTradingApp:
                             width=360,
                             content=ft.Column(
                                 controls=[
-                                    ft.Text("구글 드라이브 연결 상태를 확인할 수 없습니다.\n인터넷 연결 상태를 확인해주세요.", size=12, color=TEXT_SECONDARY),
+                                    ft.Text(f"GitHub 서버 연결에 실패했습니다.\n사유: {info.get('error', '네트워크 오류')}", size=12, color=TEXT_SECONDARY),
                                     ft.Container(height=4),
-                                    ft.Text("그래도 다운로드를 진행하시겠습니까?", size=11, color=TEXT_MUTED)
+                                    ft.Text("직접 다운로드를 시도하시겠습니까?", size=11, color=TEXT_MUTED)
                                 ],
                                 spacing=6,
                                 tight=True
@@ -4093,7 +4150,7 @@ class MobileTradingApp:
                             ft.FilledButton(
                                 "직접 다운로드 시도",
                                 style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
-                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_url), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
+                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_target_url), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
                             )
                         ],
                         actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4130,7 +4187,7 @@ class MobileTradingApp:
                             controls=[
                                 ft.Row([
                                     ft.Icon(ft.Icons.SYSTEM_UPDATE_ALT, color=ACCENT_BLUE, size=20),
-                                    ft.Text("버전 관리 및 원클릭 자동 업데이트", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                                    ft.Text("버전 관리 및 GitHub Releases 자동 업데이트", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                                 ], spacing=6),
                                 ft.Container(
                                     content=ft.Text(f"v{APP_VERSION}", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
@@ -4141,7 +4198,7 @@ class MobileTradingApp:
                             ],
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN
                         ),
-                        # 공식 구글 드라이브 연동 상태 뱃지
+                        # 공식 GitHub Releases 연동 상태 뱃지
                         ft.Container(
                             bgcolor=ft.Colors.with_opacity(0.1, PROFIT_GREEN),
                             border=ft.Border.all(1, ft.Colors.with_opacity(0.3, PROFIT_GREEN)),
@@ -4150,7 +4207,7 @@ class MobileTradingApp:
                             content=ft.Row([
                                 ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=16, color=PROFIT_GREEN),
                                 ft.Text(
-                                    "구글 드라이브 공식 최신 배포 채널 연결됨",
+                                    "GitHub Releases 공식 배포 채널 연결됨 (jj_invest)",
                                     size=11,
                                     weight=ft.FontWeight.BOLD,
                                     color=PROFIT_GREEN,
@@ -4159,7 +4216,7 @@ class MobileTradingApp:
                             ], spacing=8)
                         ),
                         ft.Text(
-                            "버튼을 누르면 먼저 구글 드라이브의 배포본과 현재 설치 버전을 비교합니다. 이미 최신 버전이면 다운로드를 방지하고 팝업으로 안내하며, 새 버전이 있을 때만 안전하게 다운로드합니다.",
+                            "버튼을 누르면 먼저 GitHub Releases의 최신 배포본과 현재 버전을 비교합니다. 이미 최신 버전이면 다운로드를 방지하고 팝업으로 안내하며, 새 릴리즈가 등록되었을 때만 안전하게 다운로드합니다.",
                             size=11,
                             color=TEXT_SECONDARY
                         ),
@@ -4168,15 +4225,15 @@ class MobileTradingApp:
                         update_btn,
                         update_status_text,
                         ft.Divider(color=BORDER_COLOR, height=1),
-                        # 고급 설정: 구글 드라이브 링크 확인 및 변경
+                        # 고급 설정: GitHub 링크 확인 및 수동 변경
                         ft.ExpansionTile(
-                            title=ft.Text("배포 링크 확인 및 수동 변경 (선택사항)", size=11, color=TEXT_MUTED),
+                            title=ft.Text("배포 채널(GitHub 저장소) 확인 및 수동 변경 (선택사항)", size=11, color=TEXT_MUTED),
                             dense=True,
                             controls_padding=ft.Padding.only(top=4, bottom=6),
                             controls=[
                                 ft.Row(
                                     controls=[
-                                        gdrive_url_field,
+                                        update_url_field,
                                         ft.IconButton(
                                             icon=ft.Icons.SAVE,
                                             icon_color=ACCENT_BLUE,
@@ -4193,7 +4250,7 @@ class MobileTradingApp:
                                     spacing=2
                                 ),
                                 ft.Text(
-                                    "※ 구글 드라이브에 같은 링크로 새 APK를 업로드해 두시면 언제든지 위 버튼으로 최신 버전을 내려받으실 수 있습니다.",
+                                    "※ GitHub Releases(wprkfgur-dotcom/jj_invest/releases)에 새 APK가 등록되면 앱에서 즉시 감지하여 업데이트할 수 있습니다.",
                                     size=10,
                                     color=TEXT_MUTED
                                 )
@@ -4204,6 +4261,7 @@ class MobileTradingApp:
                 )
             )
         )
+
 
         # 6. 앱 정보 및 개발자 크레딧 카드
         app_info_card = ft.Container(
