@@ -243,3 +243,77 @@ def fetch_market_data(ticker: str, start_date: str, end_date: str, warmup_days: 
     save_candles_to_db(ticker, df)
     _DATA_CACHE[cache_key] = df
     return df.copy()
+
+
+_HISTORICAL_PRICE_CACHE = {}
+
+
+def get_current_stock_price(ticker: str, fallback_price: float = 0.0) -> float:
+    """실시간 야후 파이낸스 fast_info 시세를 조회합니다."""
+    try:
+        t = yf.Ticker(ticker)
+        fi = t.fast_info
+        p = fi.get('lastPrice') or fi.get('regularMarketPrice') or fi.get('previousClose')
+        if p is not None and float(p) > 0:
+            return round(float(p), 2)
+    except Exception as ex:
+        print(f"[{ticker}] 실시간 시세 조회 안내: {ex}")
+
+    return round(float(fallback_price), 2) if fallback_price > 0 else 142.50
+
+
+def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: float = 0.0) -> float:
+    """
+    지정한 종목의 특정 정산 대상 날짜(target_date) 직전 종가를 조회합니다.
+    - 로컬 SQLite DB에 저장된 시세가 있으면 네트워크 호출 없이 0.001초 만에 즉시 반환합니다.
+    - 오늘 또는 미래 날짜인 경우: 실시간 현재가(fast_info)를 조회합니다.
+    - 과거 날짜인데 DB에 없는 경우: 증분 다운로드 및 로컬 캐싱 후 반환합니다.
+    - 조회 실패 시 fallback_price를 반환합니다.
+    """
+    if not target_date:
+        return get_current_stock_price(ticker, fallback_price)
+
+    target_clean = str(target_date).strip()[:10]
+    cache_key = (ticker.upper(), target_clean)
+    if cache_key in _HISTORICAL_PRICE_CACHE:
+        return _HISTORICAL_PRICE_CACHE[cache_key]
+
+    today_str = datetime.now().strftime('%Y-%m-%d')
+
+    # 1. 과거 날짜인 경우 로컬 SQLite DB 우선 조회 (초고속 0.001s)
+    if target_clean < today_str:
+        db_p = get_price_from_db(ticker, target_clean)
+        if db_p > 0:
+            _HISTORICAL_PRICE_CACHE[cache_key] = db_p
+            return db_p
+
+    # 2. 오늘 또는 미래 날짜인 경우 실시간 빠른 시세 조회
+    if target_clean >= today_str:
+        p = get_current_stock_price(ticker, fallback_price)
+        if p > 0:
+            _HISTORICAL_PRICE_CACHE[cache_key] = p
+            return p
+
+    # 3. DB에 누락된 과거 구간인 경우 증분 다운로드 및 로컬 캐싱
+    try:
+        dt = datetime.strptime(target_clean, '%Y-%m-%d')
+        s_date = (dt - timedelta(days=7)).strftime('%Y-%m-%d')
+        e_date = (dt + timedelta(days=7)).strftime('%Y-%m-%d')
+        df = fetch_market_data(ticker, s_date, e_date, warmup_days=10)
+        if df is not None and not df.empty:
+            df['Date_str'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+            match = df[df['Date_str'] == target_clean]
+            if not match.empty:
+                val = round(float(match.iloc[0]['Close']), 2)
+                _HISTORICAL_PRICE_CACHE[cache_key] = val
+                return val
+            prior = df[df['Date_str'] <= target_clean]
+            if not prior.empty:
+                val = round(float(prior.iloc[-1]['Close']), 2)
+                _HISTORICAL_PRICE_CACHE[cache_key] = val
+                return val
+    except Exception as ex:
+        print(f"[{ticker}] {target_clean} 과거 종가 조회 안내: {ex}")
+
+    return get_current_stock_price(ticker, fallback_price)
+

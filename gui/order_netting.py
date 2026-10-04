@@ -286,7 +286,7 @@ def generate_jongjong_orders(
     moc_lots = [l for l in unsold_lots if l.get('hold_days', 0) >= 10]
     loc_lots = [l for l in unsold_lots if l.get('hold_days', 0) < 10]
 
-    BB3 = round_down(AU2 * (1.0 + C2), 2)
+    BB3 = excel_round(AU2 * (1.0 + C2), 2)
 
     AU3, AV3, tung_lot = None, 0, None
     if loc_lots:
@@ -299,7 +299,7 @@ def generate_jongjong_orders(
                     AV3 = l['R']
                     break
 
-    # 1. 매도 주문 생성 (슬롯 단위 1:1 매도, 절대 쪼개지 않음)
+    # 1. 매도 주문 생성 (슬롯 단위 및 퉁치기 초과분 정밀 분할)
     formatted_sells = []
     accum_s = 0
 
@@ -321,23 +321,62 @@ def generate_jongjong_orders(
             'qty': q
         })
 
-    # (2) LOC 목표 매도
+    # (2) LOC 목표 매도 (퉁치기 슬롯 및 일반 슬롯)
     if tung_lot is not None:
-        # 퉁치기 대상 슬롯은 맥스 12.8%에 전량 매도 주문 (급등 시 청산)
-        q = tung_lot['R']
-        accum_s += q
-        formatted_sells.append({
-            '구분': '맥스 익절 매도 (퉁치기 로트)',
-            '주문유형': 'LOC 매도',
-            '주문단가': f"${BB3:.2f}",
-            '주문수량': f"{q:,}주",
-            '누적수량': f"{accum_s:,}주",
-            '예상금액': f"${BB3 * q:,.2f}",
-            '체결조건': f"종가 ≥ ${BB3:.2f} (+{C2*100:.1f}%)",
-            '비고': "12.8% 상한 도달 시 전량 청산 (퉁치기 미발생)",
-            'price': BB3,
-            'qty': q
-        })
+        # 하루 매수예정금(AU1)으로 AU3(목표가)에서 매수 가능한 최대 수량 산출
+        buyable_at_target = int(AU1 / AU3) if AU3 > 0 else 0
+
+        # 상계 수량과 예산 초과 수량 분리
+        if AV3 > buyable_at_target and buyable_at_target > 0:
+            excess_q = AV3 - buyable_at_target
+            q_net = buyable_at_target
+
+            # 1) 맥스 상한선(BB3)에 상계 수량 매도 주문
+            accum_s += q_net
+            formatted_sells.append({
+                '구분': '맥스 익절 매도 (퉁치기 로트)',
+                '주문유형': 'LOC 매도',
+                '주문단가': f"${BB3:.2f}",
+                '주문수량': f"{q_net:,}주",
+                '누적수량': f"{accum_s:,}주",
+                '예상금액': f"${BB3 * q_net:,.2f}",
+                '체결조건': f"종가 ≥ ${BB3:.2f} (+{C2*100:.1f}%)",
+                '비고': f"상계 수량 상한선 청산 ({AV3}주 중 {q_net}주)",
+                'price': BB3,
+                'qty': q_net
+            })
+
+            # 2) 원래 목표가(AU3)에 당일 매수예산 초과분 순매도 주문 (수익 실현)
+            accum_s += excess_q
+            pct_u = (AU3 / AU2 - 1.0) * 100.0
+            formatted_sells.append({
+                '구분': f"목표 익절 매도 ({tung_lot.get('date', '')} 로트)",
+                '주문유형': 'LOC 매도',
+                '주문단가': f"${AU3:.2f}",
+                '주문수량': f"{excess_q:,}주",
+                '누적수량': f"{accum_s:,}주",
+                '예상금액': f"${AU3 * excess_q:,.2f}",
+                '체결조건': f"종가 ≥ ${AU3:.2f} ({pct_u:+.1f}%)",
+                '비고': f"매수 예산 초과분 실매도 익절 ({AV3}주 중 {excess_q}주)",
+                'price': AU3,
+                'qty': excess_q
+            })
+        else:
+            # 보유량이 매수가능수량 이하인 경우 전량을 맥스 상한선(BB3)에 매도
+            q = tung_lot['R']
+            accum_s += q
+            formatted_sells.append({
+                '구분': '맥스 익절 매도 (퉁치기 로트)',
+                '주문유형': 'LOC 매도',
+                '주문단가': f"${BB3:.2f}",
+                '주문수량': f"{q:,}주",
+                '누적수량': f"{accum_s:,}주",
+                '예상금액': f"${BB3 * q:,.2f}",
+                '체결조건': f"종가 ≥ ${BB3:.2f} (+{C2*100:.1f}%)",
+                '비고': "12.8% 상한 도달 시 전량 청산 (퉁치기 미발생)",
+                'price': BB3,
+                'qty': q
+            })
 
         # 나머지 슬롯들은 원래 목표가(U)에 매도
         for l in loc_lots:
@@ -383,53 +422,76 @@ def generate_jongjong_orders(
 
     if AU1 > 0:
         if tung_lot is not None and is_normal:
-            # 퉁치기 모드 순매수 (자전거래 상계 후 순주문)
-            # 1차 매수: AU3 - 0.01 (AV3주 상계 순매수)
+            # 퉁치기 모드 순매수 (자전거래 상계 후 순주문 및 하루 거래금액 최적화)
+            buyable_at_target = int(AU1 / AU3) if AU3 > 0 else 0
+            primary_buy_qty = min(AV3, buyable_at_target) if buyable_at_target > 0 else AV3
+
+            # 1차 매수: AU3 - 0.01 (상계 가능 수량만큼 순매수)
             AY2 = safe_round4(AU3 - 0.01)
             pct1 = (AY2 / AU2 - 1.0) * 100.0
-            accum_b += AV3
+            accum_b += primary_buy_qty
             formatted_buys.append({
                 '호가단계': '1차 순매수 (퉁치기 상계)',
                 '주문유형': 'LOC 매수',
                 '주문단가': f"${AY2:.2f}",
-                '주문수량': f"{AV3:,}주",
+                '주문수량': f"{primary_buy_qty:,}주",
                 '누적수량': f"{accum_b:,}주",
-                '예상금액': f"${AY2 * AV3:,.2f}",
+                '예상금액': f"${AY2 * primary_buy_qty:,.2f}",
                 '체결조건': f"종가 ≤ ${AY2:.2f} ({pct1:+.1f}%)",
-                '비고': f"최저 목표가(${AU3:.2f}) 하단 상계 순매수",
+                '비고': f"목표가(${AU3:.2f}) 하단 1차 상계 순매수 ({primary_buy_qty}주)",
                 'price': AY2,
-                'qty': AV3
+                'qty': primary_buy_qty
             })
 
-            # 2차 매수: 하단 밴드 (-12.8%): int(AU1 / AY3_raw) - int(AU1 / AY2)
+            # 2차 추가 매수: 단가 하락으로 1회 매수예정금(AU1)으로 AV3주를 채울 수 있는 임계 가격 (BE3 공식)
+            # BE3 = round_down(AU1 / (AV3 + 1), 2) + 0.01
+            add_qty = AV3 - primary_buy_qty
+            if add_qty > 0 and AV3 > 0:
+                BE3 = round(round_down(AU1 / (AV3 + 1.0), 2) + 0.01, 2)
+                if BE3 < AY2:
+                    accum_b += add_qty
+                    pct_be3 = (BE3 / AU2 - 1.0) * 100.0
+                    formatted_buys.append({
+                        '호가단계': '2차 순매수 (예산 소진)',
+                        '주문유형': 'LOC 매수',
+                        '주문단가': f"${BE3:.2f}",
+                        '주문수량': f"{add_qty:,}주",
+                        '누적수량': f"{accum_b:,}주",
+                        '예상금액': f"${BE3 * add_qty:,.2f}",
+                        '체결조건': f"종가 ≤ ${BE3:.2f} ({pct_be3:+.1f}%)",
+                        '비고': f"단가 하락 시 하루 거래금액 100% 소진 추가 매수 (+{add_qty}주)",
+                        'price': BE3,
+                        'qty': add_qty
+                    })
+
+            # 3차 매수: 하단 밴드 (-12.8%): int(AU1 / AY3_raw) - AV3 (누적 수량 기준 잔여)
             AY3_raw = AU2 * (1.0 - C2)
-            AY3 = round_down(AY3_raw, 2)
+            AY3 = excel_round(AY3_raw, 2)
             total_at_ay3 = int(AU1 / AY3_raw) if AY3_raw > 0 else 0
-            total_at_ay2 = int(AU1 / AY2) if AY2 > 0 else 0
-            q2 = max(0, total_at_ay3 - total_at_ay2)
-            if q2 > 0:
-                accum_b += q2
+            q_band = max(0, total_at_ay3 - max(accum_b, AV3))
+            if q_band > 0:
+                accum_b += q_band
                 formatted_buys.append({
-                    '호가단계': '2차 순매수 (-12.8% 하단)',
+                    '호가단계': f"{len(formatted_buys)+1}차 순매수 (-12.8% 하단)",
                     '주문유형': 'LOC 매수',
                     '주문단가': f"${AY3:.2f}",
-                    '주문수량': f"{q2:,}주",
+                    '주문수량': f"{q_band:,}주",
                     '누적수량': f"{accum_b:,}주",
-                    '예상금액': f"${AY3 * q2:,.2f}",
+                    '예상금액': f"${AY3 * q_band:,.2f}",
                     '체결조건': f"종가 ≤ ${AY3:.2f} (-{C2*100:.1f}%)",
-                    '비고': f"하단 밴드 잔여 순매수 ({total_at_ay3}주 - {total_at_ay2}주)",
+                    '비고': f"하단 밴드 잔여 순매수 (총 {total_at_ay3}주 채움)",
                     'price': AY3,
-                    'qty': q2
+                    'qty': q_band
                 })
 
-            # 3차 매수: 폭락장 대비 (-17.0%)
+            # 4차 매수: 폭락장 대비 (-17.0%)
             BE4_raw = AU2 * (1.0 + C3)
-            BE4 = round_down(BE4_raw, 2)
+            BE4 = excel_round(BE4_raw, 2)
             BF4 = excel_round(AU1 / BE4_raw, 0) if BE4_raw > 0 else 0
             if BF4 > 0:
                 accum_b += BF4
                 formatted_buys.append({
-                    '호가단계': '3차 순매수 (-17.0% 폭락 대비)',
+                    '호가단계': f"{len(formatted_buys)+1}차 순매수 (-17.0% 폭락 대비)",
                     '주문유형': 'LOC 매수',
                     '주문단가': f"${BE4:.2f}",
                     '주문수량': f"{BF4:,}주",
@@ -444,9 +506,16 @@ def generate_jongjong_orders(
             # 퉁치기 없는 일반 분할 매수 (원조 종종이 공식 완벽 반영)
             is_riskoff = (mode == 'Riskoff')
             a_val = C2 if is_normal else (-0.055 if is_riskoff else 0.0)
-            AY2 = safe_round4(AU2 * (1.0 + a_val) - 0.01)
+            if is_normal:
+                BB3 = excel_round(AU2 * (1.0 + C2), 2)
+                AY2 = round(BB3 - 0.02, 2)
+                AY3_raw = AU2 * (1.0 - C2)
+                AY3 = round(round_down(AY3_raw, 2) - 0.01, 2)
+            else:
+                AY2 = safe_round4(AU2 * (1.0 + a_val) - 0.01)
+                AY3 = safe_round4(AU2 * (1.0 - C2))
+
             AZ2 = int(AU1 / AY2) if AY2 > 0 else 0
-            AY3 = safe_round4(AU2 * (1.0 - C2))
 
             AY4 = C4 - 1
             ay_list = [AY2]
@@ -490,7 +559,7 @@ def generate_jongjong_orders(
 
             # 폭락장 대비 매수 (-17.0%)
             BE4_raw = AU2 * (1.0 + C3)
-            BE4 = round_down(BE4_raw, 2)
+            BE4 = excel_round(BE4_raw, 2)
             BF4 = excel_round(AU1 / BE4_raw, 0) if BE4_raw > 0 else 0
             if BF4 > 0:
                 accum_b += BF4

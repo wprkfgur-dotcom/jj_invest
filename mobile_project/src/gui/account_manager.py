@@ -55,9 +55,15 @@ class AccountManager:
             print(f"계좌 파일 로드 중 오류: {e}")
             return []
 
-    def save_accounts(self, accounts: list):
+    def save_accounts(self, accounts: list, skip_cloud_sync: bool = False):
         with open(self.filepath, 'w', encoding='utf-8') as f:
             json.dump(accounts, f, ensure_ascii=False, indent=2)
+        if not skip_cloud_sync:
+            try:
+                from core.cloud_sync import trigger_async_upload
+                trigger_async_upload(accounts)
+            except Exception:
+                pass
 
     def add_account(self, name: str, strategy: str, ticker: str, start_date: str, initial_seed: float, memo: str = "",
                     trade_records: list = None, adjustments: list = None, current_date: str = None, operational_state: str = None,
@@ -359,12 +365,11 @@ class AccountManager:
             return None
 
         records = acc.get('trade_records', [])
-        if records:
-            last_date_str = records[-1]['Date']
-        else:
-            last_date_str = acc.get('current_date', acc.get('start_date', '2026-01-02'))
+        base_d_str = acc.get('current_date')
+        if not base_d_str:
+            base_d_str = records[-1]['Date'] if records else acc.get('start_date', '2026-01-02')
 
-        curr_d = parse_date(last_date_str)
+        curr_d = parse_date(base_d_str)
         next_d = get_next_trading_day(curr_d)
         next_d_str = next_d.strftime('%Y-%m-%d')
 
@@ -374,7 +379,7 @@ class AccountManager:
         return acc
 
     def record_daily_close(self, acc_id: str, close_price: float, buy_qty: int = 0, buy_price: float = None,
-                           sell_qty: int = 0, sell_price: float = None, memo: str = "") -> dict:
+                           sell_qty: int = 0, sell_price: float = None, memo: str = "", trade_date: str = None) -> dict:
         """
         미국 주식 시장 마감 후 당일 종가와 실제 체결 수량을 기록하고 계좌 잔고 및 일지를 갱신합니다.
         """
@@ -384,7 +389,7 @@ class AccountManager:
             return None
 
         records = acc.setdefault('trade_records', [])
-        curr_d_str = acc.get('current_date')
+        curr_d_str = trade_date.strip() if (trade_date and str(trade_date).strip()) else acc.get('current_date')
         if not curr_d_str:
             curr_d_str = records[-1]['Date'] if records else acc.get('start_date', '2026-01-02')
 
@@ -420,12 +425,22 @@ class AccountManager:
 
         if shares_to_sell > 0:
             unsold_lots = [r for r in records if r.get('R', 0) > 0 and not r.get('Sold', False)]
+            t_yield = 0.0275 if '종종이' in acc.get('strategy', '') else 0.05
 
-            # 슬롯 매도 우선순위 정렬 (목표가 도달 익절 우선, 낮은 목표가 순)
+            def get_lot_u(lot):
+                raw_u = lot.get('U')
+                if raw_u is not None and not pd.isna(raw_u):
+                    return float(raw_u)
+                bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
+                return round_up(bp * (1.0 + t_yield), 2)
+
+            # 슬롯 매도 우선순위 정렬 (만기 및 목표가 도달 익절 우선, 낮은 목표가 순)
             def get_sort_key(lot):
-                u_val = float(lot.get('U', 999999.0)) if lot.get('U') is not None else 999999.0
+                u_val = get_lot_u(lot)
+                h_days = len(records) - 1 - int(lot.get('t', 0))
+                is_moc = (h_days >= 10)
                 is_target_reached = (close_p >= u_val - 1e-4)
-                priority = 0 if is_target_reached else 1
+                priority = 0 if (is_target_reached or is_moc) else 1
                 return (priority, u_val)
 
             sorted_unsold_lots = sorted(unsold_lots, key=get_sort_key)
@@ -433,10 +448,13 @@ class AccountManager:
             for lot in sorted_unsold_lots:
                 if shares_to_sell <= 0:
                     break
-                u_val = float(lot.get('U', 999999.0)) if lot.get('U') is not None else 999999.0
+                u_val = get_lot_u(lot)
+                h_days = len(records) - 1 - int(lot.get('t', 0))
+                is_moc = (h_days >= 10)
                 is_target_reached = (close_p >= u_val - 1e-4)
-                # 종종이 전략 보호: 개별 목표가에 도달하지 않은 슬롯은 손절 매도되지 않도록 철저히 보호
-                if not is_target_reached and '종종이' in acc.get('strategy', ''):
+
+                # 종종이 전략 보호: 목표가 미도달 및 만기 미도달 슬롯은 보호
+                if not is_target_reached and not is_moc and '종종이' in acc.get('strategy', ''):
                     continue
 
                 lot_r = int(lot['R'])
@@ -453,8 +471,14 @@ class AccountManager:
                     net_sell_proceeds += net_s
                     shares_to_sell -= lot_r
                 else:
-                    # 부분 매도 시 슬롯 분할 차감
-                    pass
+                    # 부분 매도 시 슬롯 차감
+                    sold_part = shares_to_sell
+                    lot['R'] = lot_r - sold_part
+                    gross_s = sell_p * sold_part
+                    net_s = gross_s - gross_s * (fee_rate + sec_fee)
+                    net_sell_proceeds += net_s
+                    shares_to_sell = 0
+                    break
 
         # 2. 매수 체결 정산
         buy_q = int(buy_qty)
@@ -517,6 +541,7 @@ class AccountManager:
         else:
             records.append(new_entry)
 
+        acc['current_date'] = curr_d_str
         acc['operational_state'] = 'DAY_COMPLETED'  # 장 마감 정산 완료 상태
         self.save_accounts(accounts)
         return acc
@@ -654,6 +679,16 @@ class AccountManager:
         else:
             last_completed_date = start_date
             latest_close = float(df_market.iloc[-1]['Close']) if (df_market is not None and not df_market.empty) else 0.0
+            if latest_close <= 0.0:
+                try:
+                    from core.data import get_stock_price_for_date, get_price_from_db
+                    p_db = get_stock_price_for_date(ticker, start_date)
+                    if p_db > 0:
+                        latest_close = p_db
+                    else:
+                        latest_close = get_price_from_db(ticker, start_date)
+                except Exception:
+                    pass
             hold_shares = 0
             final_cash = initial_seed
             final_asset = initial_seed
@@ -723,17 +758,16 @@ class AccountManager:
         op_state = acc.get('operational_state', 'WAITING_FOR_FILL' if not records else 'DAY_COMPLETED')
         current_date_str = acc.get('current_date', last_completed_date)
 
+        target_order_date = current_date_str
         if op_state == 'WAITING_FOR_FILL':
-            target_order_date = current_date_str
             display_status = f"{target_order_date} (미국 장전 - 주문 대기 중)"
         else:
-            next_t_d = get_next_trading_day(parse_date(current_date_str))
-            target_order_date = next_t_d.strftime('%Y-%m-%d')
             display_status = f"{current_date_str} (장 마감 정산 완료)"
 
         sell_orders = []
         buy_orders = []
         net_result = {}
+        unsold_lots = []
 
         if '종종이' in strategy_name:
             strat = JongJongStrategy(initial_capital=initial_seed)
@@ -852,6 +886,7 @@ class AccountManager:
             'mode': mode,
             'sell_orders': sell_orders,
             'buy_orders': buy_orders,
+            'unsold_lots': unsold_lots,
             'netting_info': net_result,
             'df_res': df_res,
             'adjustments': adjustments

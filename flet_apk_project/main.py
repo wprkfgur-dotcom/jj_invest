@@ -15,6 +15,7 @@ import io
 import base64
 import subprocess
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import numpy as np
@@ -43,6 +44,12 @@ from core.cloud_sync import (
     get_sync_config, save_sync_config, is_sync_enabled,
     test_connection, upload_accounts_to_drive, download_accounts_from_drive,
     sync_local_with_drive, get_gas_script_code
+)
+from core.app_update import (
+    APP_VERSION, APP_BUILD_NAME, APP_BUILD_DATE_STR, get_update_config, save_update_config,
+    parse_gdrive_download_url, extract_gdrive_file_id,
+    DEFAULT_APK_DRIVE_URL, DEFAULT_DIRECT_DOWNLOAD_URL,
+    check_remote_version_info, trigger_apk_download
 )
 
 
@@ -631,9 +638,18 @@ class MobileTradingApp:
         self.current_tab_index = 0       # 0: 홈, 1: 계좌 현황, 2: 백테스트, 3: 투자 전략, 4: 설정
         self.viewing_account_id = None    # None이면 메인 탭 표시, 특정 ID면 계좌 상세 화면 표시
 
-        # 백테스트 상태 저장용
+        # 백테스트 상태 및 폼 입력값 영구 보존용
         self.bt_results = None
         self.bt_is_loading = False
+        self.bt_ticker = "SOXL"
+        self.bt_period = "최근 3년"
+        self.bt_seed = "200000"
+        self.bt_strat_jongjong = True
+        self.bt_strat_infinite = True
+        self.bt_strat_bnh = True
+        self.bt_start_date = "2022-01-03"
+        self.bt_end_date = datetime.now().strftime('%Y-%m-%d')
+        self.bt_custom_visible = False
 
         # 차트 롱프레스 터치 인스펙션 상태
         self.home_chart_dates = []
@@ -805,6 +821,8 @@ class MobileTradingApp:
 
             start_field.value = s_val
             end_field.value = e_val
+            self.bt_start_date = s_val
+            self.bt_end_date = e_val
             try:
                 start_field.update()
                 end_field.update()
@@ -1942,10 +1960,8 @@ class MobileTradingApp:
         elif fallback_p <= 0:
             fallback_p = 142.50
 
-        # 입력해야 하는 정산 대상 일자 결정 (대기 상태면 curr_d, 마감 완료 상태면 다음 거래일 target_date)
-        default_settle_date = curr_d if op_state == 'WAITING_FOR_FILL' else target_date
-        if not default_settle_date:
-            default_settle_date = target_date or curr_d or datetime.now().strftime('%Y-%m-%d')
+        # 입력해야 하는 정산 대상 일자 결정 (현재 표시 운용일)
+        default_settle_date = curr_d or target_date or datetime.now().strftime('%Y-%m-%d')
 
         # 미매도 슬롯 및 전략 정보 추출
         unsold_lots_data = dtl.get('unsold_lots', [])
@@ -2068,7 +2084,7 @@ class MobileTradingApp:
                 b_q = int(buy_qty_field.value.strip())
                 s_q = int(sell_qty_field.value.strip())
                 self.am.record_daily_close(acc_id=acc_id, close_price=c_p, buy_qty=b_q, sell_qty=s_q, buy_price=c_p, trade_date=s_date)
-                show_toast(self.page, f"{s_date} 장 마감 정산이 완료되었습니다!")
+                show_toast(self.page, f"{s_date} 정산 데이터가 저장되었습니다! 다음 날짜 주문표로 넘어가려면 [다음 거래일 진행]을 누르세요.")
                 self.reload_data()
             except Exception as ex:
                 show_toast(self.page, f"정산 오류: {ex}", is_error=True)
@@ -2256,9 +2272,20 @@ class MobileTradingApp:
     # TAB 2: 📊 백테스트 (전략 검증 및 성과 비교 차트)
     # =================================================================
     def _build_backtest_tab(self):
+        cur_ticker = getattr(self, 'bt_ticker', 'SOXL')
+        cur_period = getattr(self, 'bt_period', '최근 3년')
+        cur_seed = getattr(self, 'bt_seed', '200000')
+        cur_jj = getattr(self, 'bt_strat_jongjong', True)
+        cur_inf = getattr(self, 'bt_strat_infinite', True)
+        cur_bnh = getattr(self, 'bt_strat_bnh', True)
+        cur_s_date = getattr(self, 'bt_start_date', '2022-01-03')
+        cur_e_date = getattr(self, 'bt_end_date', datetime.now().strftime('%Y-%m-%d'))
+        cur_custom_vis = getattr(self, 'bt_custom_visible', False) or (cur_period == "직접 날짜 선택 (사용자 지정)")
+
         ticker_dd = ft.Dropdown(
             label="대상 종목",
-            value="SOXL",
+            label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
+            value=cur_ticker,
             options=[
                 ft.dropdown.Option("SOXL"),
                 ft.dropdown.Option("TQQQ"),
@@ -2269,28 +2296,45 @@ class MobileTradingApp:
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
             color=TEXT_PRIMARY,
+            text_size=12.5,
+            dense=True,
+            content_padding=ft.Padding.only(left=8, right=2, top=4, bottom=4),
             expand=True
         )
+
+        def on_ticker_change(e):
+            self.bt_ticker = ticker_dd.value
+
+        ticker_dd.on_change = on_ticker_change
 
         # 복수 선택 가능한 전략 체크박스
         cb_jongjong = ft.Checkbox(
             label="종종이 전략",
-            value=True,
+            value=cur_jj,
             active_color=PROFIT_GREEN,
             label_style=ft.TextStyle(color=TEXT_PRIMARY, size=12, weight=ft.FontWeight.W_600)
         )
         cb_infinite = ft.Checkbox(
             label="무한매수 v4",
-            value=True,
+            value=cur_inf,
             active_color=RESERVE_AMBER,
             label_style=ft.TextStyle(color=TEXT_PRIMARY, size=12, weight=ft.FontWeight.W_600)
         )
         cb_bnh = ft.Checkbox(
             label="단순보유(B&H)",
-            value=True,
+            value=cur_bnh,
             active_color=ACCENT_BLUE,
             label_style=ft.TextStyle(color=TEXT_PRIMARY, size=12, weight=ft.FontWeight.W_600)
         )
+
+        def on_cb_change(e):
+            self.bt_strat_jongjong = cb_jongjong.value
+            self.bt_strat_infinite = cb_infinite.value
+            self.bt_strat_bnh = cb_bnh.value
+
+        cb_jongjong.on_change = on_cb_change
+        cb_infinite.on_change = on_cb_change
+        cb_bnh.on_change = on_cb_change
 
         strat_selector = ft.Container(
             bgcolor=SURFACE_CONTAINER,
@@ -2311,7 +2355,8 @@ class MobileTradingApp:
 
         period_dd = ft.Dropdown(
             label="테스트 기간",
-            value="최근 3년",
+            label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
+            value=cur_period,
             options=[
                 ft.dropdown.Option("최근 1년"),
                 ft.dropdown.Option("최근 2년"),
@@ -2323,22 +2368,33 @@ class MobileTradingApp:
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
             color=TEXT_PRIMARY,
+            text_size=11.5,
+            dense=True,
+            content_padding=ft.Padding.only(left=8, right=2, top=4, bottom=4),
             expand=True
         )
 
         seed_field = ft.TextField(
             label="초기 투자 원금 ($)",
-            value="200000",
+            value=cur_seed,
             keyboard_type=ft.KeyboardType.NUMBER,
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
             color=TEXT_PRIMARY,
+            text_size=12.5,
+            dense=True,
+            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
             expand=True
         )
 
+        def on_seed_change(e):
+            self.bt_seed = seed_field.value
+
+        seed_field.on_change = on_seed_change
+
         # 직접 날짜 선택 필드
-        default_start_date = "2022-01-03"
-        default_end_date = datetime.now().strftime('%Y-%m-%d')
+        default_start_date = cur_s_date
+        default_end_date = cur_e_date
 
         custom_date_summary = ft.Text(
             f"직접 기간: {default_start_date} ~ {default_end_date}",
@@ -2382,7 +2438,7 @@ class MobileTradingApp:
         )
 
         custom_date_container = ft.Container(
-            visible=False,
+            visible=cur_custom_vis,
             bgcolor=SURFACE_CONTAINER,
             border=ft.Border.all(1, ACCENT_BLUE),
             border_radius=10,
@@ -2412,7 +2468,9 @@ class MobileTradingApp:
 
         def open_custom_date_flow(e=None):
             period_dd.value = "직접 날짜 선택 (사용자 지정)"
+            self.bt_period = "직접 날짜 선택 (사용자 지정)"
             custom_date_container.visible = True
+            self.bt_custom_visible = True
             try:
                 period_dd.update()
                 custom_date_container.update()
@@ -2423,10 +2481,12 @@ class MobileTradingApp:
 
         def on_period_change(e):
             val = getattr(e.control, 'value', None) or period_dd.value
+            self.bt_period = val
             if val and "직접" in val:
                 open_custom_date_flow()
             else:
                 custom_date_container.visible = False
+                self.bt_custom_visible = False
                 try:
                     custom_date_container.update()
                     self.page.update()
@@ -2434,6 +2494,7 @@ class MobileTradingApp:
                     pass
 
         period_dd.on_select = on_period_change
+        period_dd.on_change = on_period_change
 
         progress_ring = ft.ProgressRing(visible=False, color=ACCENT_BLUE, width=24, height=24)
         run_btn = ft.FilledButton(
@@ -2458,6 +2519,17 @@ class MobileTradingApp:
         def handle_run_backtest(e):
             t = ticker_dd.value
             p_val = period_dd.value
+
+            # 사용자가 선택한 입력 상태 보존
+            self.bt_ticker = t
+            self.bt_period = p_val
+            self.bt_seed = seed_field.value
+            self.bt_strat_jongjong = cb_jongjong.value
+            self.bt_strat_infinite = cb_infinite.value
+            self.bt_strat_bnh = cb_bnh.value
+            self.bt_start_date = start_date_field.value
+            self.bt_end_date = end_date_field.value
+            self.bt_custom_visible = custom_date_container.visible
 
             selected_strats = []
             if cb_jongjong.value:
@@ -2697,17 +2769,17 @@ class MobileTradingApp:
                         ], spacing=6),
                         ft.Container(height=4),
                         ft.Row([
-                            ft.Container(content=ticker_dd, width=110),
+                            ft.Container(content=ticker_dd, width=125),
                             period_dd,
                             ft.OutlinedButton(
                                 content=ft.Row([
-                                    ft.Icon(ft.Icons.CALENDAR_MONTH, size=15, color=ACCENT_BLUE),
-                                    ft.Text("직접 선택", size=12, color=ACCENT_BLUE)
-                                ], spacing=4),
+                                    ft.Icon(ft.Icons.CALENDAR_MONTH, size=14, color=ACCENT_BLUE),
+                                    ft.Text("직접선택", size=11, color=ACCENT_BLUE)
+                                ], spacing=3),
                                 style=ft.ButtonStyle(
                                     side=ft.BorderSide(1, ACCENT_BLUE),
                                     shape=ft.RoundedRectangleBorder(radius=8),
-                                    padding=ft.Padding.symmetric(horizontal=8, vertical=10)
+                                    padding=ft.Padding.symmetric(horizontal=6, vertical=8)
                                 ),
                                 tooltip="직접 시작일/종료일 선택 창을 엽니다.",
                                 on_click=open_custom_date_flow
@@ -3824,6 +3896,315 @@ class MobileTradingApp:
             )
         )
 
+        # 5-2. 버전 확인 및 구글 드라이브 원클릭 자동 업데이트 카드
+        update_cfg = get_update_config()
+        saved_drive_url = update_cfg.get("apk_drive_url") or DEFAULT_APK_DRIVE_URL
+
+        gdrive_url_field = ft.TextField(
+            label="배포 구글 드라이브 링크",
+            value=saved_drive_url,
+            hint_text=DEFAULT_APK_DRIVE_URL,
+            label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
+            border_color=BORDER_COLOR,
+            focused_border_color=ACCENT_BLUE,
+            color=TEXT_PRIMARY,
+            text_size=11,
+            content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+            expand=True
+        )
+
+        update_status_text = ft.Text(
+            f"현재 설치 버전: v{APP_VERSION} (최신 ARM64 배포판)",
+            size=11,
+            color=TEXT_MUTED
+        )
+
+        initial_download_url = parse_gdrive_download_url(saved_drive_url)
+
+        def handle_save_update_url(e):
+            url_val = gdrive_url_field.value.strip() or DEFAULT_APK_DRIVE_URL
+            gdrive_url_field.value = url_val
+            cfg = get_update_config()
+            cfg["apk_drive_url"] = url_val
+            save_update_config(cfg)
+            show_toast(self.page, "구글 드라이브 링크가 저장되었습니다.")
+            update_status_text.value = f"현재 버전: v{APP_VERSION} • 링크 연동 완료"
+            self.page.update()
+
+        def handle_reset_update_url(e):
+            gdrive_url_field.value = DEFAULT_APK_DRIVE_URL
+            cfg = get_update_config()
+            cfg["apk_drive_url"] = DEFAULT_APK_DRIVE_URL
+            save_update_config(cfg)
+            show_toast(self.page, "기본 구글 드라이브 링크로 초기화되었습니다.")
+            update_status_text.value = f"현재 버전: v{APP_VERSION} • 기본 링크 연결됨"
+            self.page.update()
+
+        def handle_check_and_update(e):
+            url_val = gdrive_url_field.value.strip() or DEFAULT_APK_DRIVE_URL
+            download_url = parse_gdrive_download_url(url_val)
+            if not download_url:
+                show_toast(self.page, "유효한 구글 드라이브 링크가 아닙니다.", is_error=True)
+                return
+
+            update_btn.disabled = True
+            update_btn.content = ft.Row([
+                ft.ProgressRing(width=16, height=16, stroke_width=2, color=ft.Colors.BLACK),
+                ft.Text("최신 버전 확인 중...", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.BLACK)
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=8)
+            update_btn.update()
+
+            def _worker():
+                info = check_remote_version_info(url_val)
+                update_btn.disabled = False
+                update_btn.content = ft.Row([
+                    ft.Icon(ft.Icons.SYSTEM_UPDATE_ROUNDED, size=18, color=ft.Colors.BLACK),
+                    ft.Text("최신 버전 확인 및 업데이트", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.BLACK)
+                ], alignment=ft.MainAxisAlignment.CENTER, spacing=8)
+                update_btn.update()
+
+                if info.get("status") == "success":
+                    cfg = get_update_config()
+                    cfg["apk_drive_url"] = url_val
+                    cfg["last_check_time"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    save_update_config(cfg)
+                    update_status_text.value = f"설치 버전: v{APP_VERSION} • 최근 확인: {cfg['last_check_time']} (정상 연동)"
+                    update_status_text.update()
+
+                    if not info.get("is_newer"):
+                        # 1. 이미 최신 버전인 경우 (다운로드 방지 및 팝업 안내)
+                        dlg = ft.AlertDialog(
+                            modal=True,
+                            title=ft.Row([
+                                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=PROFIT_GREEN, size=22),
+                                ft.Text("최신 버전 사용 중", size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ], spacing=8),
+                            content=ft.Container(
+                                width=360,
+                                content=ft.Column(
+                                    controls=[
+                                        ft.Container(
+                                            padding=12,
+                                            bgcolor=ft.Colors.with_opacity(0.12, PROFIT_GREEN),
+                                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, PROFIT_GREEN)),
+                                            border_radius=8,
+                                            content=ft.Text(
+                                                f"현재 이미 가장 최신 버전(v{APP_VERSION})을 사용하고 계십니다!\n새 버전이 없어 불필요한 다운로드를 진행하지 않습니다.",
+                                                size=12,
+                                                weight=ft.FontWeight.W_500,
+                                                color=PROFIT_GREEN
+                                            )
+                                        ),
+                                        ft.Container(height=4),
+                                        ft.Row([ft.Text("• 현재 설치 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{APP_VERSION} (최신)", size=11, color=TEXT_PRIMARY, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Row([ft.Text("• 드라이브 배포일:", size=11, color=TEXT_MUTED), ft.Text(info.get('remote_date_str', APP_BUILD_DATE_STR), size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Row([ft.Text("• 배포 파일 크기:", size=11, color=TEXT_MUTED), ft.Text(f"{info.get('remote_size_mb', 0)} MB", size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Divider(color=BORDER_COLOR, height=1),
+                                        ft.Text("※ 앱을 초기화하거나 재설치할 목적이 아니라면 다시 다운로드하실 필요가 없습니다.", size=10, color=TEXT_MUTED)
+                                    ],
+                                    spacing=6,
+                                    tight=True
+                                )
+                            ),
+                            actions=[
+                                ft.TextButton("확인 (닫기)", on_click=lambda _: self.page.pop_dialog()),
+                                ft.TextButton(
+                                    "강제 재다운로드",
+                                    style=ft.ButtonStyle(color=TEXT_MUTED),
+                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_url), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
+                                )
+                            ],
+                            actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            bgcolor=SURFACE_CARD,
+                            shape=ft.RoundedRectangleBorder(radius=14)
+                        )
+                        self.page.show_dialog(dlg)
+                    else:
+                        # 2. 새로운 최신 버전이 있는 경우 (다운로드 확인 팝업)
+                        dlg = ft.AlertDialog(
+                            modal=True,
+                            title=ft.Row([
+                                ft.Icon(ft.Icons.NEW_RELEASES_ROUNDED, color=ACCENT_BLUE, size=22),
+                                ft.Text("새로운 업데이트 발견! 🚀", size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ], spacing=8),
+                            content=ft.Container(
+                                width=360,
+                                content=ft.Column(
+                                    controls=[
+                                        ft.Container(
+                                            padding=12,
+                                            bgcolor=ft.Colors.with_opacity(0.12, ACCENT_BLUE),
+                                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, ACCENT_BLUE)),
+                                            border_radius=8,
+                                            content=ft.Text(
+                                                "구글 드라이브에 새로운 최신 배포본이 등록되었습니다!\n지금 바로 업데이트하시겠습니까?",
+                                                size=12,
+                                                weight=ft.FontWeight.BOLD,
+                                                color=ACCENT_BLUE
+                                            )
+                                        ),
+                                        ft.Container(height=4),
+                                        ft.Row([ft.Text("• 현재 설치 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{APP_VERSION}", size=11, color=TEXT_SECONDARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Row([ft.Text("• 최신 배포 버전:", size=11, color=TEXT_MUTED), ft.Text(f"v{info.get('remote_version') or '최신'}", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Row([ft.Text("• 배포 일시:", size=11, color=TEXT_MUTED), ft.Text(info.get('remote_date_str', '최신'), size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Row([ft.Text("• 파일 크기:", size=11, color=TEXT_MUTED), ft.Text(f"{info.get('remote_size_mb', 0)} MB", size=11, color=TEXT_PRIMARY)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                                        ft.Divider(color=BORDER_COLOR, height=1),
+                                        ft.Text("※ 다운로드 완료 후 상단 알림을 터치하면 기존 계좌 데이터를 유지한 채 바로 업데이트됩니다.", size=10, color=TEXT_MUTED)
+                                    ],
+                                    spacing=6,
+                                    tight=True
+                                )
+                            ),
+                            actions=[
+                                ft.TextButton("나중에", on_click=lambda _: self.page.pop_dialog()),
+                                ft.FilledButton(
+                                    "🚀 지금 업데이트 다운로드",
+                                    style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
+                                    on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_url), show_toast(self.page, "구글 드라이브에서 최신 APK 다운로드를 시작합니다..."))
+                                )
+                            ],
+                            actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            bgcolor=SURFACE_CARD,
+                            shape=ft.RoundedRectangleBorder(radius=14)
+                        )
+                        self.page.show_dialog(dlg)
+                else:
+                    # 3. 네트워크 에러 등으로 확인 실패한 경우
+                    dlg = ft.AlertDialog(
+                        modal=True,
+                        title=ft.Row([
+                            ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color=RESERVE_AMBER, size=22),
+                            ft.Text("버전 확인 실패", size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                        ], spacing=8),
+                        content=ft.Container(
+                            width=360,
+                            content=ft.Column(
+                                controls=[
+                                    ft.Text("구글 드라이브 연결 상태를 확인할 수 없습니다.\n인터넷 연결 상태를 확인해주세요.", size=12, color=TEXT_SECONDARY),
+                                    ft.Container(height=4),
+                                    ft.Text("그래도 다운로드를 진행하시겠습니까?", size=11, color=TEXT_MUTED)
+                                ],
+                                spacing=6,
+                                tight=True
+                            )
+                        ),
+                        actions=[
+                            ft.TextButton("닫기", on_click=lambda _: self.page.pop_dialog()),
+                            ft.FilledButton(
+                                "직접 다운로드 시도",
+                                style=ft.ButtonStyle(bgcolor=ACCENT_BLUE, color=ft.Colors.BLACK),
+                                on_click=lambda _: (self.page.pop_dialog(), trigger_apk_download(download_url), show_toast(self.page, "최신 APK 다운로드를 시작합니다..."))
+                            )
+                        ],
+                        actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                        bgcolor=SURFACE_CARD,
+                        shape=ft.RoundedRectangleBorder(radius=14)
+                    )
+                    self.page.show_dialog(dlg)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        update_btn = ft.FilledButton(
+            content=ft.Row([
+                ft.Icon(ft.Icons.SYSTEM_UPDATE_ROUNDED, size=18, color=ft.Colors.BLACK),
+                ft.Text("최신 버전 확인 및 업데이트", size=13, weight=ft.FontWeight.BOLD, color=ft.Colors.BLACK)
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
+            style=ft.ButtonStyle(
+                bgcolor=ACCENT_BLUE,
+                shape=ft.RoundedRectangleBorder(radius=10),
+                padding=ft.Padding.symmetric(vertical=13, horizontal=14)
+            ),
+            expand=True,
+            on_click=handle_check_and_update
+        )
+
+        app_update_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.Row([
+                                    ft.Icon(ft.Icons.SYSTEM_UPDATE_ALT, color=ACCENT_BLUE, size=20),
+                                    ft.Text("버전 관리 및 원클릭 자동 업데이트", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                                ], spacing=6),
+                                ft.Container(
+                                    content=ft.Text(f"v{APP_VERSION}", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
+                                    bgcolor=ft.Colors.with_opacity(0.15, PROFIT_GREEN),
+                                    padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                                    border_radius=6
+                                )
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        ),
+                        # 공식 구글 드라이브 연동 상태 뱃지
+                        ft.Container(
+                            bgcolor=ft.Colors.with_opacity(0.1, PROFIT_GREEN),
+                            border=ft.Border.all(1, ft.Colors.with_opacity(0.3, PROFIT_GREEN)),
+                            border_radius=8,
+                            padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, size=16, color=PROFIT_GREEN),
+                                ft.Text(
+                                    "구글 드라이브 공식 최신 배포 채널 연결됨",
+                                    size=11,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=PROFIT_GREEN,
+                                    expand=True
+                                )
+                            ], spacing=8)
+                        ),
+                        ft.Text(
+                            "버튼을 누르면 먼저 구글 드라이브의 배포본과 현재 설치 버전을 비교합니다. 이미 최신 버전이면 다운로드를 방지하고 팝업으로 안내하며, 새 버전이 있을 때만 안전하게 다운로드합니다.",
+                            size=11,
+                            color=TEXT_SECONDARY
+                        ),
+                        ft.Container(height=2),
+                        # 원클릭 자동 업데이트 실행 버튼
+                        update_btn,
+                        update_status_text,
+                        ft.Divider(color=BORDER_COLOR, height=1),
+                        # 고급 설정: 구글 드라이브 링크 확인 및 변경
+                        ft.ExpansionTile(
+                            title=ft.Text("배포 링크 확인 및 수동 변경 (선택사항)", size=11, color=TEXT_MUTED),
+                            dense=True,
+                            controls_padding=ft.Padding.only(top=4, bottom=6),
+                            controls=[
+                                ft.Row(
+                                    controls=[
+                                        gdrive_url_field,
+                                        ft.IconButton(
+                                            icon=ft.Icons.SAVE,
+                                            icon_color=ACCENT_BLUE,
+                                            tooltip="링크 저장",
+                                            on_click=handle_save_update_url
+                                        ),
+                                        ft.IconButton(
+                                            icon=ft.Icons.RESTART_ALT,
+                                            icon_color=TEXT_MUTED,
+                                            tooltip="기본 링크로 초기화",
+                                            on_click=handle_reset_update_url
+                                        )
+                                    ],
+                                    spacing=2
+                                ),
+                                ft.Text(
+                                    "※ 구글 드라이브에 같은 링크로 새 APK를 업로드해 두시면 언제든지 위 버튼으로 최신 버전을 내려받으실 수 있습니다.",
+                                    size=10,
+                                    color=TEXT_MUTED
+                                )
+                            ]
+                        )
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
         # 6. 앱 정보 및 개발자 크레딧 카드
         app_info_card = ft.Container(
             padding=16,
@@ -3835,18 +4216,60 @@ class MobileTradingApp:
                     ft.Row(
                         controls=[
                             ft.Icon(ft.Icons.INFO_OUTLINE, size=18, color=ACCENT_BLUE),
-                            ft.Text("종종 투자 모바일 (JongJong Mobile) v1.0.0", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                            ft.Text(f"종종 투자 모바일 (JongJong Mobile) v{APP_VERSION}", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                         ],
                         spacing=8
                     ),
                     ft.Divider(color=BORDER_COLOR, height=1),
-                    ft.Row(
-                        controls=[
-                            ft.Icon(ft.Icons.CODE_ROUNDED, size=18, color=PROFIT_GREEN),
-                            ft.Text("Developed by Hyuk", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
-                        ],
-                        spacing=8
+                    # 프로젝트 크레딧 (역할별 시각적 위계 적용)
+                    ft.Container(
+                        bgcolor=ft.Colors.with_opacity(0.12, ACCENT_BLUE),
+                        border=ft.Border.all(1, ft.Colors.with_opacity(0.35, ACCENT_BLUE)),
+                        border_radius=8,
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=8),
+                        content=ft.Row(
+                            controls=[
+                                ft.Row([
+                                    ft.Icon(ft.Icons.CODE_ROUNDED, size=18, color=ACCENT_BLUE),
+                                    ft.Text("App Development:", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                ], spacing=6),
+                                ft.Container(
+                                    content=ft.Text("이혁", size=13.5, weight=ft.FontWeight.BOLD, color=ft.Colors.BLACK),
+                                    bgcolor=ACCENT_BLUE,
+                                    padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                                    border_radius=6
+                                )
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        )
                     ),
+                    ft.Container(
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                        content=ft.Row(
+                            controls=[
+                                ft.Row([
+                                    ft.Icon(ft.Icons.ANALYTICS_OUTLINED, size=15, color=TEXT_SECONDARY),
+                                    ft.Text("Logic Design:", size=12, weight=ft.FontWeight.W_600, color=TEXT_SECONDARY),
+                                ], spacing=6),
+                                ft.Text("최용민", size=12, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        )
+                    ),
+                    ft.Container(
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=1),
+                        content=ft.Row(
+                            controls=[
+                                ft.Row([
+                                    ft.Icon(ft.Icons.COFFEE_ROUNDED, size=13, color=TEXT_MUTED),
+                                    ft.Text("Do Nothing:", size=11, color=TEXT_MUTED),
+                                ], spacing=6),
+                                ft.Text("이종필, 윤석배", size=11, color=TEXT_MUTED)
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                        )
+                    ),
+                    ft.Divider(color=BORDER_COLOR, height=1),
                     ft.Text("엔진: Python 3.12 & Flutter (Flet 1.0.2) • 데이터: data/accounts.json, data/market_data.db", size=10, color=TEXT_MUTED),
                 ],
                 spacing=8
@@ -3864,6 +4287,8 @@ class MobileTradingApp:
                 cache_card,
                 ft.Container(height=6),
                 bug_report_card,
+                ft.Container(height=6),
+                app_update_card,
                 ft.Container(height=6),
                 future_card,
                 ft.Container(height=6),
@@ -4004,8 +4429,8 @@ class MobileTradingApp:
                         name_f, seed_f, ft.Container(height=2), slider_text, slider, memo_f,
                         ft.Container(height=4),
                         ft.Row([
-                            ft.Icon(ft.Icons.CODE_ROUNDED, size=14, color=PROFIT_GREEN),
-                            ft.Text("Developed by Hyuk", size=11, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD)
+                            ft.Icon(ft.Icons.CODE_ROUNDED, size=14, color=ACCENT_BLUE),
+                            ft.Text("App Dev: 이혁", size=11, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD)
                         ], alignment=ft.MainAxisAlignment.END, spacing=4)
                     ],
                     spacing=8,
@@ -4202,6 +4627,11 @@ class MobileTradingApp:
 # 애플리케이션 엔트리 포인트
 # =====================================================================
 def main(page: ft.Page):
+    if sys.platform == "win32":
+        page.title = "종종이 & 무한매수 트레이더 (Windows Debug)"
+        page.window.width = 440
+        page.window.height = 890
+        page.window.resizable = True
     app = MobileTradingApp(page)
     page.add(app.content_container)
 

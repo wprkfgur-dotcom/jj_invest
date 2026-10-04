@@ -53,12 +53,16 @@ htmlcov/
 .ruff_cache/
 *.log
 
-# Sensitive Account Data
+# Sensitive Account Data & Runtime State
 **/accounts.json
 **/accounts.backup.json
-data/cloud_sync_config.json
+**/cloud_sync_config.json
+**/app_update_config.json
+**/invest_flow.db
+flet_apk_project/data/
 data/test_*.json
 data/*.csv
 scratch/
 scratch/test_*.csv
+
 

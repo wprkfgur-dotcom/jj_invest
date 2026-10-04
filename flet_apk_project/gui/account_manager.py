@@ -365,12 +365,11 @@ class AccountManager:
             return None
 
         records = acc.get('trade_records', [])
-        if records:
-            last_date_str = records[-1]['Date']
-        else:
-            last_date_str = acc.get('current_date', acc.get('start_date', '2026-01-02'))
+        base_d_str = acc.get('current_date')
+        if not base_d_str:
+            base_d_str = records[-1]['Date'] if records else acc.get('start_date', '2026-01-02')
 
-        curr_d = parse_date(last_date_str)
+        curr_d = parse_date(base_d_str)
         next_d = get_next_trading_day(curr_d)
         next_d_str = next_d.strftime('%Y-%m-%d')
 
@@ -680,6 +679,16 @@ class AccountManager:
         else:
             last_completed_date = start_date
             latest_close = float(df_market.iloc[-1]['Close']) if (df_market is not None and not df_market.empty) else 0.0
+            if latest_close <= 0.0:
+                try:
+                    from core.data import get_stock_price_for_date, get_price_from_db
+                    p_db = get_stock_price_for_date(ticker, start_date)
+                    if p_db > 0:
+                        latest_close = p_db
+                    else:
+                        latest_close = get_price_from_db(ticker, start_date)
+                except Exception:
+                    pass
             hold_shares = 0
             final_cash = initial_seed
             final_asset = initial_seed
@@ -749,12 +758,10 @@ class AccountManager:
         op_state = acc.get('operational_state', 'WAITING_FOR_FILL' if not records else 'DAY_COMPLETED')
         current_date_str = acc.get('current_date', last_completed_date)
 
+        target_order_date = current_date_str
         if op_state == 'WAITING_FOR_FILL':
-            target_order_date = current_date_str
             display_status = f"{target_order_date} (미국 장전 - 주문 대기 중)"
         else:
-            next_t_d = get_next_trading_day(parse_date(current_date_str))
-            target_order_date = next_t_d.strftime('%Y-%m-%d')
             display_status = f"{current_date_str} (장 마감 정산 완료)"
 
         sell_orders = []
