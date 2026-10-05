@@ -31,6 +31,7 @@ from gui.account_manager import AccountManager
 from gui.order_netting import calculate_order_netting
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
+from strategies.vr_v5 import ValueRebalancingV5Strategy
 from core.data import get_current_stock_price, get_price_from_db
 from core.app_update import APP_VERSION, check_remote_version_info, parse_download_url
 from mobile.theme import BG_DARK, ACCENT_BLUE, PROFIT_GREEN, LOSS_RED
@@ -181,6 +182,53 @@ class TestJongJongTrader(unittest.TestCase):
                 pass
             subprocess.run(["taskkill", "/F", "/IM", "flet.exe"], capture_output=True)
             subprocess.run(["taskkill", "/F", "/IM", "JongJongTrader_Mobile.exe"], capture_output=True)
+
+    def test_tc8_vr_v5_strategy_and_orders(self):
+        """TC-8: 라오어 밸류리밸런싱 VR 5.0 전략 엔진 및 2주 기간예약 주문 산출 검증"""
+        # 1. 전략 엔진 초기화 검증
+        strat = ValueRebalancingV5Strategy(
+            ticker='TQQQ',
+            initial_capital=100000.0,
+            g_value=10.0,
+            band_pct=0.15,
+            pool_usage_limit=0.50
+        )
+        self.assertEqual(strat.g_value, 10.0)
+        self.assertEqual(strat.band_pct, 0.15)
+        self.assertEqual(strat.pool_usage_limit, 0.50)
+
+        # 2. 2주 기간예약 주문표 (P_buy = V_min / n, P_sell = V_max / n) 산출 검증
+        v_test = 85000.0
+        v_min = v_test * 0.85 # 72,250
+        v_max = v_test * 1.15 # 97,750
+        buys, sells = strat.calculate_order_ladder(
+            v_val=v_test,
+            current_hold=1000,
+            pool_cash=15000.0,
+            pool_usage_limit=0.50
+        )
+        self.assertGreater(len(buys), 0)
+        self.assertGreater(len(sells), 0)
+        # 매수 1차 가격은 v_min / 1000 = 72.25
+        self.assertEqual(buys[0]['price'], 72.25)
+        # 매도 1차 가격은 v_max / 1000 = 97.75
+        self.assertEqual(sells[0]['price'], 97.75)
+
+        # 3. AccountManager 계좌 연동 및 주문표 산출 검증
+        am = AccountManager(filepath=self.test_accounts_file)
+        acc = am.add_account(
+            name="VR_테스트계좌",
+            strategy="VR 5.0 (밸류리밸런싱)",
+            ticker="TQQQ",
+            start_date="2026-01-02",
+            initial_seed=100000.0,
+            memo="VR 5.0 테스트"
+        )
+        dtl = am.compute_account_details(acc)
+        self.assertIn("VR 5.0", dtl['strategy_name'])
+        self.assertIn("buy_orders", dtl)
+        self.assertIn("sell_orders", dtl)
+        self.assertGreater(len(dtl['buy_orders']), 0)
 
 
 if __name__ == "__main__":

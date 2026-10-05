@@ -13,6 +13,7 @@ import pandas as pd
 
 from strategies.jongjong import JongJongStrategy, round_up
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
+from strategies.vr_v5 import ValueRebalancingV5Strategy
 from gui.order_netting import calculate_order_netting, generate_jongjong_orders
 from core.market_calendar import get_next_trading_day, parse_date
 
@@ -238,6 +239,8 @@ class AccountManager:
             strategy = '종종이 기본전략'
         elif '무한' in file_path:
             strategy = '무한매수법 v4.0'
+        elif 'VR' in file_path.upper():
+            strategy = 'VR 5.0'
 
         initial_seed = 150000.0
         if 'InitialSeed' in df.columns and not df['InitialSeed'].isna().all():
@@ -829,6 +832,42 @@ class AccountManager:
             )
             sell_orders = net_result['net_sell_orders']
             buy_orders = net_result['net_buy_orders']
+        elif 'VR' in strategy_name.upper():
+            reserve_ratio = 0.0
+            ar_val = initial_seed
+            ak_val = 0.0
+            g_val = float(acc.get('g_value', 10.0))
+            band_pct = float(acc.get('band_pct', 0.15))
+            pool_usage_limit = float(acc.get('pool_usage_limit', 0.50))
+            num_recs = len(df_res)
+            cycle_num = (num_recs // 10) + 1
+            day_in_cycle = (num_recs % 10) + 1
+            mode = f"2주 {day_in_cycle}/10일차"
+
+            v_val = float(acc.get('v_value', 0.0))
+            if v_val <= 0.0:
+                v_val = (hold_shares * latest_close) if (hold_shares > 0 and latest_close > 0) else (initial_seed * 0.85)
+
+            strat = ValueRebalancingV5Strategy(
+                ticker=ticker,
+                initial_capital=initial_seed,
+                g_value=g_val,
+                band_pct=band_pct,
+                pool_usage_limit=pool_usage_limit
+            )
+            buy_orders, sell_orders = strat.calculate_order_ladder(
+                v_val=v_val,
+                current_hold=hold_shares,
+                pool_cash=final_cash,
+                pool_usage_limit=pool_usage_limit,
+                current_price=latest_close,
+                max_orders=15
+            )
+            budget = max(0.0, final_cash * pool_usage_limit)
+            net_result = {
+                'is_netted': False,
+                'summary_text': f"⚡ [VR 5.0 2주 예약] V: ${v_val:,.2f} | 밴드: ${v_val*(1-band_pct):,.2f} ~ ${v_val*(1+band_pct):,.2f} | 가용 Pool: ${budget:,.2f}"
+            }
         else:
             reserve_ratio = 0.0
             ar_val = initial_seed

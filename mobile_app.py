@@ -35,6 +35,7 @@ from core.data import fetch_market_data, get_db_date_range
 from core.metrics import calculate_metrics
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
+from strategies.vr_v5 import ValueRebalancingV5Strategy
 from strategies.buy_and_hold import BuyAndHoldStrategy
 from core.cloud_sync import (
     get_sync_config, save_sync_config, is_sync_enabled,
@@ -50,7 +51,7 @@ from core.app_update import (
 
 from mobile.theme import (
     BG_DARK, SURFACE_CARD, SURFACE_CONTAINER, BORDER_COLOR, ACCENT_BLUE, PROFIT_GREEN,
-    LOSS_RED, RESERVE_AMBER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    LOSS_RED, RESERVE_AMBER, VR_PURPLE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 )
 from mobile.helpers import (
     copy_text_to_clipboard, show_toast, make_bug_report_mailto, parse_picked_date_str,
@@ -79,6 +80,7 @@ class MobileTradingApp:
         self.bt_seed = "200000"
         self.bt_strat_jongjong = True
         self.bt_strat_infinite = True
+        self.bt_strat_vr = True
         self.bt_strat_bnh = True
         self.bt_start_date = "2022-01-03"
         self.bt_end_date = datetime.now().strftime('%Y-%m-%d')
@@ -1053,7 +1055,7 @@ class MobileTradingApp:
                                 ft.Column(
                                     controls=[
                                         ft.Text(f"{name} ({ticker})", size=16, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                        ft.Text(f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=TEXT_SECONDARY)
+                                        ft.Text(f"{strat} • {mode} (2주 리밸런싱)" if 'VR' in strat.upper() else f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=VR_PURPLE if 'VR' in strat.upper() else TEXT_SECONDARY)
                                     ],
                                     spacing=2
                                 ),
@@ -1080,19 +1082,19 @@ class MobileTradingApp:
                         ft.Row(
                             controls=[
                                 ft.Column([
-                                    ft.Text("위기준비금 (AK)", size=10, color=RESERVE_AMBER),
-                                    ft.Text(f"${ak_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=RESERVE_AMBER)
+                                    ft.Text("2주 사이클" if 'VR' in strat.upper() else "위기준비금 (AK)", size=10, color=VR_PURPLE if 'VR' in strat.upper() else RESERVE_AMBER),
+                                    ft.Text(f"{mode}" if 'VR' in strat.upper() else f"${ak_val:,.0f}", size=13 if 'VR' in strat.upper() else 14, weight=ft.FontWeight.BOLD, color=VR_PURPLE if 'VR' in strat.upper() else RESERVE_AMBER)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("실가동시드 (AR)", size=10, color=ACCENT_BLUE),
-                                    ft.Text(f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                                    ft.Text("보유 수량" if 'VR' in strat.upper() else "실가동시드 (AR)", size=10, color=ACCENT_BLUE),
+                                    ft.Text(f"{hold:,}주" if 'VR' in strat.upper() else f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("하루 배분 예산", size=10, color=TEXT_SECONDARY),
+                                    ft.Text("가용 Pool 예산" if 'VR' in strat.upper() else "하루 배분 예산", size=10, color=TEXT_SECONDARY),
                                     ft.Text(f"${budget:,.2f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("예수금", size=10, color=TEXT_SECONDARY),
+                                    ft.Text("예수금 (Pool)" if 'VR' in strat.upper() else "예수금", size=10, color=TEXT_SECONDARY),
                                     ft.Text(f"${cash:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
                                 ], spacing=1),
                             ],
@@ -1194,22 +1196,45 @@ class MobileTradingApp:
                 )
             )
 
-        holdings_section = ft.Column(
-            controls=[
-                ft.Row(
+        if 'VR' in strat.upper():
+            holdings_section = ft.Container(
+                bgcolor=SURFACE_CARD,
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.35, VR_PURPLE)),
+                border_radius=12,
+                padding=14,
+                content=ft.Column(
                     controls=[
                         ft.Row([
-                            ft.Icon(ft.Icons.LAYERS_OUTLINED, color=ACCENT_BLUE, size=18),
-                            ft.Text("매입 조각 현황", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ft.Icon(ft.Icons.AUTO_AWESOME, color=VR_PURPLE, size=18),
+                            ft.Text("VR 5.0 밸류리밸런싱 2주 사이클 안내", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                         ], spacing=6),
-                        ft.Text(f"총 {total_pieces}조각 보유 중 ({hold:,}주)", size=12, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD)
+                        ft.Text(
+                            f"현재 보유: {hold:,}주 (평가액: ${hold*latest_price:,.2f}) • 예수금(Pool): ${cash:,.2f}\n"
+                            f"2주(10거래일) 동안 아래의 예약 주문표를 증권사에 기간예약 주문으로 걸어두세요. "
+                            f"주가가 밴드를 이탈할 때만 자동 매매되어 밴드 안으로 복귀합니다.",
+                            size=11.5, color=TEXT_SECONDARY
+                        )
                     ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                ),
-                *lot_cards
-            ],
-            spacing=8
-        )
+                    spacing=6
+                )
+            )
+        else:
+            holdings_section = ft.Column(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            ft.Row([
+                                ft.Icon(ft.Icons.LAYERS_OUTLINED, color=ACCENT_BLUE, size=18),
+                                ft.Text("매입 조각 현황", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                            ], spacing=6),
+                            ft.Text(f"총 {total_pieces}조각 보유 중 ({hold:,}주)", size=12, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD)
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    *lot_cards
+                ],
+                spacing=8
+            )
 
         # -------------------------------------------------------------
         # 3. 금일 매수·매도 주문표 (간결하고 직관적인 수량 중심 UI)
@@ -1283,7 +1308,7 @@ class MobileTradingApp:
                         controls=[
                             ft.Row([
                                 ft.Icon(ft.Icons.ARROW_UPWARD, color=LOSS_RED, size=16),
-                                ft.Text("🔴 매도 주문", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
+                                ft.Text("🔴 2주 매도 예약 (상단 밴드)" if 'VR' in strat.upper() else "🔴 매도 주문", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
                             ], spacing=6),
                             ft.Container(
                                 content=ft.Text(f"총 {total_sell_qty:,}주" if total_sell_qty > 0 else "0건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
@@ -1350,7 +1375,7 @@ class MobileTradingApp:
                         controls=[
                             ft.Row([
                                 ft.Icon(ft.Icons.ARROW_DOWNWARD, color=PROFIT_GREEN, size=16),
-                                ft.Text("🟢 매수 주문", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
+                                ft.Text("🟢 2주 매수 예약 (하단 밴드)" if 'VR' in strat.upper() else "🟢 매수 주문", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
                             ], spacing=6),
                             ft.Container(
                                 content=ft.Text(f"총 {total_buy_qty:,}주" if total_buy_qty > 0 else "0건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
@@ -1707,6 +1732,7 @@ class MobileTradingApp:
         cur_seed = getattr(self, 'bt_seed', '200000')
         cur_jj = getattr(self, 'bt_strat_jongjong', True)
         cur_inf = getattr(self, 'bt_strat_infinite', True)
+        cur_vr = getattr(self, 'bt_strat_vr', True)
         cur_bnh = getattr(self, 'bt_strat_bnh', True)
         cur_s_date = getattr(self, 'bt_start_date', '2022-01-03')
         cur_e_date = getattr(self, 'bt_end_date', datetime.now().strftime('%Y-%m-%d'))
@@ -1750,6 +1776,12 @@ class MobileTradingApp:
             active_color=RESERVE_AMBER,
             label_style=ft.TextStyle(color=TEXT_PRIMARY, size=12, weight=ft.FontWeight.W_600)
         )
+        cb_vr = ft.Checkbox(
+            label="VR 5.0",
+            value=cur_vr,
+            active_color=VR_PURPLE,
+            label_style=ft.TextStyle(color=TEXT_PRIMARY, size=12, weight=ft.FontWeight.W_600)
+        )
         cb_bnh = ft.Checkbox(
             label="단순보유(B&H)",
             value=cur_bnh,
@@ -1760,10 +1792,12 @@ class MobileTradingApp:
         def on_cb_change(e):
             self.bt_strat_jongjong = cb_jongjong.value
             self.bt_strat_infinite = cb_infinite.value
+            self.bt_strat_vr = cb_vr.value
             self.bt_strat_bnh = cb_bnh.value
 
         cb_jongjong.on_change = on_cb_change
         cb_infinite.on_change = on_cb_change
+        cb_vr.on_change = on_cb_change
         cb_bnh.on_change = on_cb_change
 
         strat_selector = ft.Container(
@@ -1777,7 +1811,7 @@ class MobileTradingApp:
                         ft.Icon(ft.Icons.CHECKLIST, color=ACCENT_BLUE, size=15),
                         ft.Text("검증 전략 선택 (복수 선택 시 한 그래프에 동시 비교)", size=12, weight=ft.FontWeight.BOLD, color=TEXT_SECONDARY),
                     ], spacing=6),
-                    ft.Row([cb_jongjong, cb_infinite, cb_bnh], spacing=6, wrap=True)
+                    ft.Row([cb_jongjong, cb_infinite, cb_vr, cb_bnh], spacing=6, wrap=True)
                 ],
                 spacing=4
             )
@@ -1956,6 +1990,7 @@ class MobileTradingApp:
             self.bt_seed = seed_field.value
             self.bt_strat_jongjong = cb_jongjong.value
             self.bt_strat_infinite = cb_infinite.value
+            self.bt_strat_vr = cb_vr.value
             self.bt_strat_bnh = cb_bnh.value
             self.bt_start_date = start_date_field.value
             self.bt_end_date = end_date_field.value
@@ -1966,6 +2001,8 @@ class MobileTradingApp:
                 selected_strats.append(('종종이 기본전략', PROFIT_GREEN, False))
             if cb_infinite.value:
                 selected_strats.append(('무한매수법 v4.0', RESERVE_AMBER, False))
+            if cb_vr.value:
+                selected_strats.append(('VR 5.0 (밸류리밸런싱)', VR_PURPLE, False))
             if cb_bnh.value:
                 selected_strats.append((f'{t} 단순보유(B&H)', ACCENT_BLUE, True))
 
@@ -2123,6 +2160,8 @@ class MobileTradingApp:
                             st = JongJongStrategy(initial_capital=cap, reserve_ratio=0.05)
                         elif "무한" in strat_name:
                             st = InfiniteBuyingV4Strategy(ticker=t, initial_capital=cap, divisions=40)
+                        elif "VR" in strat_name:
+                            st = ValueRebalancingV5Strategy(ticker=t, initial_capital=cap, g_value=10.0, band_pct=0.15)
                         else:
                             st = BuyAndHoldStrategy(name=f"{t} 단순보유", initial_capital=cap)
 
@@ -2560,16 +2599,68 @@ class MobileTradingApp:
             )
         )
 
-        # 4. 전략 비교 매트릭스 카드
-        def make_comparison_row(title, v1, v2):
+        # 4. 라오어 밸류리밸런싱 VR 5.0 카드
+        vr_card = ft.Card(
+            bgcolor=SURFACE_CARD,
+            elevation=2,
+            shape=ft.RoundedRectangleBorder(radius=14),
+            content=ft.Container(
+                padding=16,
+                content=ft.Column(
+                    controls=[
+                        ft.Row([
+                            ft.Container(
+                                content=ft.Text("전략 3", size=11, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                                bgcolor=VR_PURPLE,
+                                padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                                border_radius=6
+                            ),
+                            ft.Text("라오어 밸류리밸런싱 VR 5.0", size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                        ], spacing=8),
+                        ft.Container(height=4),
+                        ft.Text("2주 사이클 밸류 밴드(±15%) & 풀(Pool) 기반 자동 리밸런싱", size=12, color=VR_PURPLE, weight=ft.FontWeight.W_500),
+                        ft.Divider(color=BORDER_COLOR, height=1),
+
+                        make_section_title(ft.Icons.AUTO_AWESOME, "핵심 운용 철학", VR_PURPLE),
+                        ft.Text(
+                            "목표 평가액 가이드라인 곡선 V를 설정하고, 2주(10거래일)마다 증권사에 기간예약 주문을 걸어두어 "
+                            "주가가 상하단 밴드(V ±15%)를 벗어날 때만 기계적으로 매수/매도하여 밴드로 복귀시키는 중장기 레버리지 자산배분 전략입니다.",
+                            size=11, color=TEXT_SECONDARY
+                        ),
+                        ft.Container(height=4),
+
+                        make_section_title(ft.Icons.CALENDAR_MONTH, "2주(10거래일) 사이클 & V 갱신 공식", VR_PURPLE),
+                        make_bullet_point("V 갱신 공식", "다음 V = 현재 V + (Pool / G) ± (적립금 or 인출금)"),
+                        make_bullet_point("G(기울기) 인자", "G=10(기본/적립·거치) ~ G=20(인출식/보수적)으로 V의 상승 속도를 조절합니다."),
+                        make_bullet_point("현금 풀(Pool)", "하락장에서 든든한 매수 방패 역할을 하며, 상승 익절 시 수익금을 흡수하여 현금을 비축합니다."),
+                        ft.Container(height=4),
+
+                        make_section_title(ft.Icons.SWAP_VERT, "2주치 예약 주문 (상·하단 밴드)", VR_PURPLE),
+                        make_bullet_point("하단 밴드 매수 (V * 0.85)", "주가 하락 시 P_buy = V_min / n 가격에 순차 매수하여 Pool을 소진하고 주식 비중을 늘립니다."),
+                        make_bullet_point("상단 밴드 매도 (V * 1.15)", "주가 급등 시 P_sell = V_max / n 가격에 분할 익절하여 확정 수익을 Pool로 회수합니다."),
+                        ft.Container(height=4),
+
+                        make_section_title(ft.Icons.SAVINGS, "운용 유형별 Pool 한도", VR_PURPLE),
+                        make_bullet_point("적립식 VR", "2주마다 적립금 추가 투입 + 사이클당 Pool의 75%까지 매수 사용"),
+                        make_bullet_point("거치식 VR", "원금 일시 거치 + 사이클당 Pool의 50%까지 매수 사용"),
+                        make_bullet_point("인출식 VR", "2주마다 생활비 인출 + 사이클당 Pool의 25%까지 보수적 매수 사용")
+                    ],
+                    spacing=8
+                )
+            )
+        )
+
+        # 5. 전략 비교 매트릭스 카드
+        def make_comparison_row(title, v1, v2, v3):
             return ft.Container(
                 padding=ft.Padding.symmetric(vertical=6),
                 border=ft.Border(bottom=ft.BorderSide(1, BORDER_COLOR)),
                 content=ft.Row([
-                    ft.Text(title, size=11, weight=ft.FontWeight.BOLD, color=TEXT_MUTED, width=80),
-                    ft.Text(v1, size=11, color=PROFIT_GREEN, expand=True),
-                    ft.Text(v2, size=11, color=RESERVE_AMBER, expand=True),
-                ], spacing=6)
+                    ft.Text(title, size=11, weight=ft.FontWeight.BOLD, color=TEXT_MUTED, width=65),
+                    ft.Text(v1, size=10, color=PROFIT_GREEN, expand=1),
+                    ft.Text(v2, size=10, color=RESERVE_AMBER, expand=1),
+                    ft.Text(v3, size=10, color=VR_PURPLE, expand=1),
+                ], spacing=4)
             )
 
         comparison_card = ft.Card(
@@ -2582,24 +2673,24 @@ class MobileTradingApp:
                     controls=[
                         ft.Row([
                             ft.Icon(ft.Icons.COMPARE_ARROWS, color=ACCENT_BLUE, size=18),
-                            ft.Text("두 전략 한눈에 비교", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                            ft.Text("3대 투자 전략 한눈에 비교", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                         ], spacing=6),
                         ft.Container(height=4),
                         ft.Row([
-                            ft.Text("구분", size=11, weight=ft.FontWeight.BOLD, color=TEXT_MUTED, width=80),
-                            ft.Text("종종이 기본전략", size=11, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN, expand=True),
-                            ft.Text("무한매수법 v4.0", size=11, weight=ft.FontWeight.BOLD, color=RESERVE_AMBER, expand=True),
-                        ], spacing=6),
+                            ft.Text("구분", size=11, weight=ft.FontWeight.BOLD, color=TEXT_MUTED, width=65),
+                            ft.Text("종종이 기본", size=10.5, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN, expand=1),
+                            ft.Text("무한매수 v4", size=10.5, weight=ft.FontWeight.BOLD, color=RESERVE_AMBER, expand=1),
+                            ft.Text("VR 5.0", size=10.5, weight=ft.FontWeight.BOLD, color=VR_PURPLE, expand=1),
+                        ], spacing=4),
                         ft.Divider(color=BORDER_COLOR, height=1),
-                        make_comparison_row("주요 대상", "SOXL 등 고변동 3X", "TQQQ, SOXL, UPRO"),
-                        make_comparison_row("시장 대응", "3단계 모드 (Normal/Safe/Riskoff)", "시장 무관 기계적 40분할"),
-                        make_comparison_row("시드 분할", "모드별 8 / 7 / 5 분할", "항상 40분할 고정"),
-                        make_comparison_row("조각 운용", "조각별 100% 독립 (개별 익절)", "전체 평단가 하나로 통합"),
-                        make_comparison_row("목표 수익", "모드별 +0.25% ~ +2.75%", "사이클당 +10% 확정"),
-                        make_comparison_row("손절 원칙", "조각별 10거래일 시간손절(MOC)", "40회차 소진 시 쿼터(25%) 손절"),
-                        make_comparison_row("주문 방식", "비선형 LOC 5분할 예약 주문", "전반/후반 2개 LOC 주문"),
-                        make_comparison_row("위기준비금", "시드의 5% 격리 + 10일 복리", "별도 준비금 없음 (전액 시드)"),
-                        make_comparison_row("추천 성향", "고변동성 공략 & 고수익 회전", "단순하고 정형화된 루틴"),
+                        make_comparison_row("주요 대상", "SOXL 등 3X", "TQQQ/SOXL", "TQQQ/QLD 3X/2X"),
+                        make_comparison_row("매매 주기", "매일 밤 LOC", "매일 밤 LOC", "2주(10일) 1회 예약"),
+                        make_comparison_row("시드 분할", "8/7/5 분할", "40분할 고정", "V ±15% 밴드 분할"),
+                        make_comparison_row("조각 운용", "조각별 독립 익절", "전체 평단 통합", "전체 밸류 밴드"),
+                        make_comparison_row("현금 관리", "위기준비금 5%", "전액 시드 소진", "Pool 현금 (15~50%)"),
+                        make_comparison_row("목표 수익", "0.25% ~ 2.75%", "사이클당 +10%", "밴드 상단 돌파 익절"),
+                        make_comparison_row("손절 원칙", "10일 MOC 청산", "40회차 쿼터손절", "원칙적 손절 없음"),
+                        make_comparison_row("추천 성향", "고변동성 공략", "정형화된 루틴", "게으른 장기 투자"),
                     ],
                     spacing=2
                 )
@@ -2613,6 +2704,8 @@ class MobileTradingApp:
                 jongjong_card,
                 ft.Container(height=6),
                 infinite_card,
+                ft.Container(height=6),
+                vr_card,
                 ft.Container(height=6),
                 comparison_card,
                 ft.Container(height=24)
@@ -3805,7 +3898,7 @@ class MobileTradingApp:
         strat_f = ft.Dropdown(
             label="전략 선택",
             value="종종이 기본전략",
-            options=[ft.dropdown.Option("종종이 기본전략"), ft.dropdown.Option("무한매수법 v4.0")],
+            options=[ft.dropdown.Option("종종이 기본전략"), ft.dropdown.Option("무한매수법 v4.0"), ft.dropdown.Option("VR 5.0 (밸류리밸런싱)")],
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
             color=TEXT_PRIMARY

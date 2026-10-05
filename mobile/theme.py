@@ -11,6 +11,7 @@ ACCENT_BLUE = "#38BDF8"       # 메인 강조 하늘색
 PROFIT_GREEN = "#10B981"      # 수익/매수 에메랄드 그린
 LOSS_RED = "#F43F5E"          # 손실/매도 로즈 레드
 RESERVE_AMBER = "#F59E0B"     # 위기준비금 앰버
+VR_PURPLE = "#A855F7"         # VR 5.0 퍼플
 TEXT_PRIMARY = "#F8FAFC"      # 본문 화이트
 TEXT_SECONDARY = "#94A3B8"    # 보조 텍스트 (그레이)
 TEXT_MUTED = "#64748B"
