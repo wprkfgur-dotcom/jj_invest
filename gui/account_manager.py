@@ -50,7 +50,16 @@ class AccountManager:
             if not os.path.exists(self.filepath):
                 return []
             with open(self.filepath, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                accounts = json.load(f)
+            # 미매도 슬롯의 실현손익 및 매도정보 정제 (한 행은 하나의 슬롯)
+            for acc in accounts:
+                for r in acc.get('trade_records', []):
+                    if not r.get('Sold', False):
+                        r['Profit'] = None
+                        r['ProfitRate'] = None
+                        r['W'] = None
+                        r['X'] = None
+            return accounts
         except Exception as e:
             print(f"계좌 파일 로드 중 오류: {e}")
             return []
@@ -381,9 +390,11 @@ class AccountManager:
         return acc
 
     def record_daily_close(self, acc_id: str, close_price: float, buy_qty: int = 0, buy_price: float = None,
-                           sell_qty: int = 0, sell_price: float = None, memo: str = "", trade_date: str = None) -> dict:
+                           sell_qty: int = 0, sell_price: float = None, memo: str = "", trade_date: str = None,
+                           mode: str = None) -> dict:
         """
         미국 주식 시장 마감 후 당일 종가와 실제 체결 수량을 기록하고 계좌 잔고 및 일지를 갱신합니다.
+        한 행은 하나의 슬롯(Lot)에 대한 정보를 담으며, 체결된 슬롯의 매도일/매도가/손익/손익률이 갱신됩니다.
         """
         accounts = self.load_accounts()
         acc = next((a for a in accounts if a['id'] == acc_id), None)
@@ -414,6 +425,9 @@ class AccountManager:
 
         close_p = round(float(close_price), 2)
         chg = (close_p / prev_close - 1.0) if prev_close > 0 else 0.0
+
+        if not mode:
+            mode = prev_rec.get('Mode', 'Normal') if prev_rec else 'Normal'
 
         fee_rate = 0.001
         sec_fee = 0.0000278
@@ -469,6 +483,9 @@ class AccountManager:
                     lot['Z'] = round(net_s, 2)
                     p_amt = net_s - float(lot.get('S', 0.0))
                     lot['Profit'] = round(p_amt, 2)
+                    bp = float(lot.get('BuyPrice', lot.get('Close', 1.0)))
+                    lot['ProfitRate'] = round((sell_p / bp - 1.0) * 100.0, 2) if bp > 0 else 0.0
+                    lot['HoldDays'] = h_days
                     total_profit += p_amt
                     net_sell_proceeds += net_s
                     shares_to_sell -= lot_r
@@ -515,8 +532,8 @@ class AccountManager:
             't': len(records) if existing_idx is None else existing_idx,
             'Date': curr_d_str,
             'Close': close_p,
-            'Chg': chg,
-            'Mode': 'Normal',
+            'Chg': round(chg, 4),
+            'Mode': mode,
             'R': buy_q,
             'BuyQty': buy_q,
             'BuyPrice': buy_p,
@@ -525,8 +542,9 @@ class AccountManager:
             'Sold': False,
             'W': None,
             'X': None,
-            'Z': round(net_sell_proceeds, 2),
-            'Profit': round(total_profit, 2),
+            'Z': 0.0,
+            'Profit': None,
+            'ProfitRate': None,
             'SellQty': sell_q,
             'Cash': new_cash,
             'Hold': new_hold,

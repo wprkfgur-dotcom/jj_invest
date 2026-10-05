@@ -249,3 +249,20 @@ def extract_pct_str(order: dict, ref_price: float) -> str:
         diff = (op - ref_price) / ref_price * 100.0
         return f"({diff:+.1f}%)"
     return ""
+
+
+def format_kr_date(date_val) -> str:
+    """
+    날짜를 한국식 요일 포함 포맷('MM.DD.(요일)')으로 변환합니다.
+    예: '2026-09-28' -> '09.28.(월)'
+    """
+    if not date_val:
+        return "-"
+    try:
+        s = str(date_val).strip()[:10]
+        dt = datetime.strptime(s, "%Y-%m-%d")
+        weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+        return f"{dt.strftime('%m.%d.')}({weekdays[dt.weekday()]})"
+    except Exception:
+        return str(date_val)[:10]
+
