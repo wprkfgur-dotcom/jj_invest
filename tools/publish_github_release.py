@@ -16,6 +16,11 @@ if sys.stdout.encoding != 'utf-8':
         pass
 
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from core.app_update import APP_VERSION
 
 REPO = "wprkfgur-dotcom/jj_invest"
