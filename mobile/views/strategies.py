@@ -9,13 +9,11 @@ from mobile.theme import (
     SURFACE_CARD, BORDER_COLOR, ACCENT_BLUE, PROFIT_GREEN,
     RESERVE_AMBER, VR_PURPLE, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED
 )
+from mobile.widgets import build_card, build_section_header
 
 
 def make_section_title(icon, title, color):
-    return ft.Row([
-        ft.Icon(icon, color=color, size=16),
-        ft.Text(title, size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-    ], spacing=6)
+    return build_section_header(title=title, icon=icon, icon_color=color, title_size=13)
 
 
 def make_bullet_point(title, desc):

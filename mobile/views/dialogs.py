@@ -168,6 +168,9 @@ def open_settings_dialog(app, acc_id: str):
     app.page.show_dialog(dlg)
 
 
+from mobile.widgets import build_confirm_dialog
+
+
 def open_delete_account_dialog(app, acc_id: str):
     """계좌 삭제 확인 대화상자를 표시합니다."""
     target = next((a for a in app.accounts if a['id'] == acc_id), None)
@@ -185,15 +188,15 @@ def open_delete_account_dialog(app, acc_id: str):
         else:
             show_toast(app.page, "삭제 실패", is_error=True)
 
-    dlg = ft.AlertDialog(
-        title=ft.Row([ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color=LOSS_RED), ft.Text("계좌 삭제 확인", weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)], spacing=8),
-        content=ft.Text(f"정말로 '{name}' 계좌를 영구 삭제하시겠습니까?\n모든 매매 기록 및 설정이 삭제됩니다.", size=13, color=TEXT_SECONDARY),
-        actions=[
-            ft.TextButton("닫기", on_click=lambda _: app.page.pop_dialog()),
-            ft.FilledButton("계좌 삭제", style=ft.ButtonStyle(bgcolor=LOSS_RED, color=ft.Colors.WHITE), on_click=handle_delete)
-        ],
-        actions_alignment=ft.MainAxisAlignment.END,
-        bgcolor=SURFACE_CARD
+    dlg = build_confirm_dialog(
+        title="계좌 삭제 확인",
+        content=f"정말로 '{name}' 계좌를 영구 삭제하시겠습니까?\n모든 매매 기록 및 설정이 삭제됩니다.",
+        on_confirm=handle_delete,
+        confirm_text="계좌 삭제",
+        cancel_text="닫기",
+        is_danger=True,
+        icon=ft.Icons.WARNING_AMBER_ROUNDED,
+        page=app.page,
     )
     app.page.show_dialog(dlg)
 
@@ -209,15 +212,15 @@ def open_undo_dialog(app, acc_id: str):
         else:
             show_toast(app.page, "취소할 기록이 없습니다.", is_error=True)
 
-    dlg = ft.AlertDialog(
-        title=ft.Row([ft.Icon(ft.Icons.UNDO, color=LOSS_RED), ft.Text("거래일 Undo 확인", weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)], spacing=8),
-        content=ft.Text("가장 최근 거래일의 정산 기록을 삭제하고 이전 상태로 되돌리시겠습니까?", size=13, color=TEXT_SECONDARY),
-        actions=[
-            ft.TextButton("닫기", on_click=lambda _: app.page.pop_dialog()),
-            ft.FilledButton("취소 실행", style=ft.ButtonStyle(bgcolor=LOSS_RED, color=ft.Colors.WHITE), on_click=handle_undo)
-        ],
-        actions_alignment=ft.MainAxisAlignment.END,
-        bgcolor=SURFACE_CARD
+    dlg = build_confirm_dialog(
+        title="거래일 Undo 확인",
+        content="가장 최근 거래일의 정산 기록을 삭제하고 이전 상태로 되돌리시겠습니까?",
+        on_confirm=handle_undo,
+        confirm_text="취소 실행",
+        cancel_text="닫기",
+        is_danger=True,
+        icon=ft.Icons.UNDO,
+        page=app.page,
     )
     app.page.show_dialog(dlg)
 

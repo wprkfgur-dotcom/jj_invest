@@ -32,7 +32,7 @@ if CURRENT_DIR not in sys.path:
 
 import flet as ft
 
-from gui.account_manager import AccountManager
+from core.account_manager import AccountManager
 from core.cloud_sync import is_sync_enabled, sync_local_with_drive
 from core.app_settings import get_exchange_rate
 from mobile.theme import (

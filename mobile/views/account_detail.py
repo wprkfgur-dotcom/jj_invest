@@ -23,6 +23,9 @@ from mobile.theme import (
 from mobile.helpers import (
     show_toast, compute_suggested_trades, extract_pct_str,
 )
+from mobile.widgets import (
+    build_card, build_section_header, build_badge,
+)
 
 
 def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
@@ -45,29 +48,29 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     mode = dtl.get('mode', 'Normal')
     latest_price = dtl.get('current_price', 0.0)
 
-    # -------------------------------------------------------------
     # 1. 계좌 기본 정보 & KPI 카드
     # -------------------------------------------------------------
-    basic_info_card = ft.Card(
-        bgcolor=SURFACE_CARD,
+    basic_info_card = build_card(
         elevation=2,
-        shape=ft.RoundedRectangleBorder(radius=14),
-        content=ft.Container(
-            padding=16,
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Column(
-                                controls=[
-                                    ft.Text(f"{name} ({ticker})", size=16, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                    ft.Text(f"{strat} • {mode} (2주 리밸런싱)" if is_vr(strat) else f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=VR_PURPLE if is_vr(strat) else TEXT_SECONDARY)
-                                ],
-                                spacing=2
-                            ),
-                        ],
-                        alignment=ft.MainAxisAlignment.START
-                    ),
+        radius=14,
+        padding=16,
+        content=ft.Column(
+            controls=[
+                ft.Row(
+                    controls=[
+                        ft.Column(
+                            controls=[
+                                ft.Row([
+                                    ft.Text(name, size=16, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                    build_badge(ticker, color=ACCENT_BLUE),
+                                ], spacing=6),
+                                ft.Text(f"{strat} • {mode} (2주 리밸런싱)" if is_vr(strat) else f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=VR_PURPLE if is_vr(strat) else TEXT_SECONDARY)
+                            ],
+                            spacing=2
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.START
+                ),
                     ft.Container(height=6),
                     ft.Row(
                         controls=[
@@ -109,7 +112,6 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
                 ]
             )
         )
-    )
 
     # -------------------------------------------------------------
     # 2. 매입 정보 (전체 몇 조각 매입했고, 각각의 수량/매입가/손실비율)
@@ -227,15 +229,11 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     else:
         holdings_section = ft.Column(
             controls=[
-                ft.Row(
-                    controls=[
-                        ft.Row([
-                            ft.Icon(ft.Icons.LAYERS_OUTLINED, color=ACCENT_BLUE, size=18),
-                            ft.Text("매입 조각 현황", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
-                        ], spacing=6),
-                        ft.Text(f"총 {total_pieces}조각 보유 중 ({hold:,}주)", size=12, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD)
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                build_section_header(
+                    title="매입 조각 현황",
+                    icon=ft.Icons.LAYERS_OUTLINED,
+                    title_size=14,
+                    action=ft.Text(f"총 {total_pieces}조각 보유 중 ({hold:,}주)", size=12, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD),
                 ),
                 *lot_cards
             ],
@@ -401,10 +399,11 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
 
     orders_section = ft.Column(
         controls=[
-            ft.Row([
-                ft.Icon(ft.Icons.RECEIPT_LONG, color=ACCENT_BLUE, size=18),
-                ft.Text(f"금일 매수·매도 주문표 ({target_date})", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
-            ], spacing=6),
+            build_section_header(
+                title=f"금일 매수·매도 주문표 ({target_date})",
+                icon=ft.Icons.RECEIPT_LONG,
+                title_size=14,
+            ),
             sell_box,
             buy_box
         ],
@@ -554,19 +553,18 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
         else:
             show_toast(app.page, "다음 거래일 진행 실패", is_error=True)
 
-    settle_card = ft.Card(
-        bgcolor=SURFACE_CARD,
+    settle_card = build_card(
         elevation=2,
-        shape=ft.RoundedRectangleBorder(radius=12),
-        content=ft.Container(
-            padding=14,
-            content=ft.Column(
-                controls=[
-                    ft.Row([
-                        ft.Icon(ft.Icons.CALCULATE_ROUNDED, color=ACCENT_BLUE, size=18),
-                        ft.Text("일일 정산 입력 (매도 자동 체결 / 매수 입력)", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                    ], spacing=6),
-                    ft.Row([
+        radius=12,
+        padding=14,
+        content=ft.Column(
+            controls=[
+                build_section_header(
+                    title="일일 정산 입력 (매도 자동 체결 / 매수 입력)",
+                    icon=ft.Icons.CALCULATE_ROUNDED,
+                    title_size=13,
+                ),
+                ft.Row([
                         settle_date_field,
                         ft.IconButton(
                             icon=ft.Icons.CALENDAR_MONTH,
@@ -614,7 +612,6 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
                 spacing=8
             )
         )
-    )
 
     # -------------------------------------------------------------
     # 5. 최근 거래 내역 (슬롯 단위 라이프사이클 & 4대 섹션 구분 표)
@@ -820,13 +817,12 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
 
     history_section = ft.Column(
         controls=[
-            ft.Row([
-                ft.Row([
-                    ft.Icon(ft.Icons.TABLE_VIEW_ROUNDED, color=ACCENT_BLUE, size=18),
-                    ft.Text("거래 슬롯별 상세 내역 (4대 섹션)", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                ], spacing=6),
-                ft.Text("(길게 탭 또는 ✏️ 눌러 수정)", size=10, color=TEXT_SECONDARY),
-            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            build_section_header(
+                title="거래 슬롯별 상세 내역 (4대 섹션)",
+                subtitle="(길게 탭 또는 ✏️ 눌러 수정)",
+                icon=ft.Icons.TABLE_VIEW_ROUNDED,
+                title_size=13,
+            ),
             history_view
         ],
         spacing=6

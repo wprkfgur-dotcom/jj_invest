@@ -11,9 +11,10 @@
 import flet as ft
 
 from mobile.theme import (
-    SURFACE_CARD, BORDER_COLOR, ACCENT_BLUE, PROFIT_GREEN,
+    BORDER_COLOR, ACCENT_BLUE, PROFIT_GREEN,
     LOSS_RED, RESERVE_AMBER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
 )
+from mobile.widgets import build_card, build_badge
 from mobile.views.home import build_empty_home_view
 
 
@@ -42,36 +43,28 @@ def build_accounts_view(app) -> ft.Control:
 
         r_color = PROFIT_GREEN if ret_pct >= 0 else LOSS_RED
 
-        card = ft.Card(
-            bgcolor=SURFACE_CARD,
+        card = build_card(
+            padding=16,
+            radius=14,
             elevation=2,
-            shape=ft.RoundedRectangleBorder(radius=14),
-            content=ft.Container(
-                padding=16,
-                border=ft.Border.all(1, BORDER_COLOR),
-                border_radius=14,
-                on_click=lambda e, target_id=aid: app.open_account_detail(target_id),
-                content=ft.Column(
-                    controls=[
-                        ft.Row(
-                            controls=[
-                                ft.Row(
-                                    controls=[
-                                        ft.Text(name, size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                        ft.Container(
-                                            content=ft.Text(ticker, size=11, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD),
-                                            bgcolor=ft.Colors.with_opacity(0.15, ACCENT_BLUE),
-                                            padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                                            border_radius=4
-                                        ),
-                                    ],
-                                    spacing=6
-                                ),
-                                ft.Icon(ft.Icons.CHEVRON_RIGHT, color=TEXT_MUTED, size=20)
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                        ),
-                        ft.Text(f"{strat} • {mode} 모드", size=11, color=TEXT_SECONDARY),
+            border_color=BORDER_COLOR,
+            on_click=lambda e, target_id=aid: app.open_account_detail(target_id),
+            content=ft.Column(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            ft.Row(
+                                controls=[
+                                    ft.Text(name, size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                                    build_badge(ticker, color=ACCENT_BLUE),
+                                ],
+                                spacing=6
+                            ),
+                            ft.Icon(ft.Icons.CHEVRON_RIGHT, color=TEXT_MUTED, size=20)
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    ft.Text(f"{strat} • {mode} 모드", size=11, color=TEXT_SECONDARY),
                         ft.Container(height=4),
                         ft.Row(
                             controls=[
@@ -109,7 +102,6 @@ def build_accounts_view(app) -> ft.Control:
                     spacing=3
                 )
             )
-        )
         cards.append(card)
 
     return ft.ListView(

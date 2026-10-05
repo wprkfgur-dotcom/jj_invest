@@ -17,6 +17,10 @@ from mobile.theme import (
     TEXT_SECONDARY, TEXT_MUTED,
 )
 from mobile.charts import render_portfolio_chart
+from mobile.widgets import (
+    build_card, build_metric_tile, build_section_header,
+    build_badge, build_empty_state
+)
 
 
 def on_home_chart_inspect(app, local_x: float):
@@ -50,36 +54,26 @@ def on_home_chart_inspect(app, local_x: float):
 
 def build_empty_home_view(app) -> ft.Control:
     """등록된 계좌가 없을 때 표시하는 가이드 뷰입니다."""
-    return ft.Column(
-        controls=[
-            ft.Container(height=80),
-            ft.Icon(ft.Icons.SAVINGS_OUTLINED, size=64, color=TEXT_MUTED),
-            ft.Text("등록된 계좌가 없습니다.", size=16, weight=ft.FontWeight.W_600, color=TEXT_SECONDARY),
-            ft.Text(
-                "우측 하단 '+' 버튼 또는 아래 버튼을 눌러\n첫 번째 계좌를 생성해보세요.",
-                size=13,
-                color=TEXT_MUTED,
-                text_align=ft.TextAlign.CENTER,
-            ),
-            ft.Container(height=16),
-            ft.FilledButton(
-                content=ft.Row(
-                    controls=[ft.Icon(ft.Icons.ADD, size=18), ft.Text("첫 계좌 생성하기", weight=ft.FontWeight.BOLD)],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=6
-                ),
-                style=ft.ButtonStyle(
-                    bgcolor=ACCENT_BLUE,
-                    color=ft.Colors.BLACK,
-                    shape=ft.RoundedRectangleBorder(radius=10),
-                    padding=ft.Padding.symmetric(horizontal=24, vertical=12)
-                ),
-                on_click=app.open_add_account_dialog
-            )
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        expand=True
+    add_btn = ft.FilledButton(
+        content=ft.Row(
+            controls=[ft.Icon(ft.Icons.ADD, size=18), ft.Text("첫 계좌 생성하기", weight=ft.FontWeight.BOLD)],
+            alignment=ft.MainAxisAlignment.CENTER,
+            spacing=6
+        ),
+        style=ft.ButtonStyle(
+            bgcolor=ACCENT_BLUE,
+            color=ft.Colors.BLACK,
+            shape=ft.RoundedRectangleBorder(radius=10),
+            padding=ft.Padding.symmetric(horizontal=24, vertical=12)
+        ),
+        on_click=app.open_add_account_dialog
+    )
+    return build_empty_state(
+        icon=ft.Icons.SAVINGS_OUTLINED,
+        title="등록된 계좌가 없습니다.",
+        subtitle="우측 하단 '+' 버튼 또는 아래 버튼을 눌러\n첫 번째 계좌를 생성해보세요.",
+        action_button=add_btn,
+        top_padding=80
     )
 
 
@@ -105,26 +99,19 @@ def build_home_view(app) -> ft.Control:
     p_icon = ft.Icons.ARROW_DROP_UP if is_profit else ft.Icons.ARROW_DROP_DOWN
 
     # 1. 통합 자산 히어로 카드
-    hero_card = ft.Card(
-        bgcolor=SURFACE_CARD,
+    hero_card = build_card(
         elevation=3,
-        shape=ft.RoundedRectangleBorder(radius=16),
-        content=ft.Container(
-            padding=18,
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Text("전체 계좌 통합 평가 자산", size=13, color=TEXT_SECONDARY, weight=ft.FontWeight.W_500),
-                            ft.Container(
-                                content=ft.Text(f"총 {len(app.accounts)}개 계좌", size=11, color=ACCENT_BLUE, weight=ft.FontWeight.BOLD),
-                                bgcolor=ft.Colors.with_opacity(0.15, ACCENT_BLUE),
-                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
-                                border_radius=10
-                            )
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                    ),
+        radius=16,
+        padding=18,
+        content=ft.Column(
+            controls=[
+                ft.Row(
+                    controls=[
+                        ft.Text("전체 계좌 통합 평가 자산", size=13, color=TEXT_SECONDARY, weight=ft.FontWeight.W_500),
+                        build_badge(f"총 {len(app.accounts)}개 계좌", color=ACCENT_BLUE, radius=10, padding_h=8, padding_v=3)
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                ),
                     ft.Container(height=4),
                     ft.Text(f"${tot_asset:,.2f}", size=32, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                     ft.Text(f"약 {krw_asset:,.0f}원 (환율 {app.exchange_rate:,.0f}원)", size=12, color=TEXT_MUTED),
@@ -148,7 +135,6 @@ def build_home_view(app) -> ft.Control:
                 ]
             )
         )
-    )
 
     # 2. 통합 자산 추이 그래프
     chart_base64, dates, vals = render_portfolio_chart(app.accounts_details, tot_asset)
@@ -169,74 +155,55 @@ def build_home_view(app) -> ft.Control:
         )
     )
 
-    chart_card = ft.Card(
-        bgcolor=SURFACE_CARD,
+    chart_card = build_card(
         elevation=2,
-        shape=ft.RoundedRectangleBorder(radius=14),
-        content=ft.Container(
-            padding=14,
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Row([
-                                ft.Icon(ft.Icons.SHOW_CHART, size=18, color=ACCENT_BLUE),
-                                ft.Text("포트폴리오 자산 성장 추이", size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                            ], spacing=6),
-                            ft.Text("길게 누르기: 수치확인 | 핀치: 확대", size=10, color=TEXT_MUTED)
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                    ),
-                    ft.Container(height=4),
-                    app.home_val_banner,
-                    ft.Container(height=4),
-                    ft.Container(
-                        height=200,
-                        border_radius=8,
-                        clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                        content=ft.InteractiveViewer(
-                            content=ft.GestureDetector(
-                                content=ft.Image(src=chart_base64, fit="contain", width=650, height=200),
-                                on_long_press_start=lambda e: on_home_chart_inspect(app, e.local_position.x),
-                                on_long_press_move_update=lambda e: on_home_chart_inspect(app, e.local_position.x),
-                                on_tap_down=lambda e: on_home_chart_inspect(app, e.local_position.x)
-                            ),
-                            constrained=True,
-                            min_scale=1.0,
-                            max_scale=4.0,
-                            pan_enabled=True,
-                            scale_enabled=True,
-                            clip_behavior=ft.ClipBehavior.HARD_EDGE
-                        )
-                    ),
-                ]
-            )
+        radius=14,
+        padding=14,
+        content=ft.Column(
+            controls=[
+                build_section_header(
+                    title="포트폴리오 자산 성장 추이",
+                    subtitle="길게 누르기: 수치확인 | 핀치: 확대",
+                    icon=ft.Icons.SHOW_CHART,
+                    title_size=13
+                ),
+                ft.Container(height=4),
+                app.home_val_banner,
+                ft.Container(height=4),
+                ft.Container(
+                    height=200,
+                    border_radius=8,
+                    clip_behavior=ft.ClipBehavior.HARD_EDGE,
+                    content=ft.InteractiveViewer(
+                        content=ft.GestureDetector(
+                            content=ft.Image(src=chart_base64, fit="contain", width=650, height=200),
+                            on_long_press_start=lambda e: on_home_chart_inspect(app, e.local_position.x),
+                            on_long_press_move_update=lambda e: on_home_chart_inspect(app, e.local_position.x),
+                            on_tap_down=lambda e: on_home_chart_inspect(app, e.local_position.x)
+                        ),
+                        constrained=True,
+                        min_scale=1.0,
+                        max_scale=4.0,
+                        pan_enabled=True,
+                        scale_enabled=True,
+                        clip_behavior=ft.ClipBehavior.HARD_EDGE
+                    )
+                ),
+            ]
         )
     )
 
     # 3. 4대 종합 지표 그리드
     def make_metric_card(title, value, subtext, icon, icon_color):
-        return ft.Container(
-            bgcolor=SURFACE_CARD,
-            border=ft.Border.all(1, BORDER_COLOR),
-            border_radius=12,
+        return build_metric_tile(
+            title=title,
+            value=value,
+            subtext=subtext,
+            icon=icon,
+            icon_color=icon_color,
+            radius=12,
             padding=12,
-            expand=True,
-            content=ft.Column(
-                controls=[
-                    ft.Row(
-                        controls=[
-                            ft.Text(title, size=11, color=TEXT_SECONDARY, weight=ft.FontWeight.W_500),
-                            ft.Icon(icon, size=16, color=icon_color)
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
-                    ),
-                    ft.Container(height=2),
-                    ft.Text(value, size=15, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                    ft.Text(subtext, size=10, color=TEXT_MUTED)
-                ],
-                spacing=1
-            )
+            expand=True
         )
 
     row1 = ft.Row(
@@ -278,12 +245,7 @@ def build_home_view(app) -> ft.Control:
                             ft.Row(
                                 controls=[
                                     ft.Text(name, size=13, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                    ft.Container(
-                                        content=ft.Text(ticker, size=10, color=ACCENT_BLUE),
-                                        bgcolor=ft.Colors.with_opacity(0.15, ACCENT_BLUE),
-                                        padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                                        border_radius=4
-                                    )
+                                    build_badge(ticker, color=ACCENT_BLUE, text_size=10, font_weight=ft.FontWeight.NORMAL),
                                 ],
                                 spacing=6
                             ),

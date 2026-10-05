@@ -70,6 +70,7 @@ cmd = [
     "--hidden-import=mobile",
     "--hidden-import=mobile.theme",
     "--hidden-import=mobile.helpers",
+    "--hidden-import=mobile.widgets",
     "--hidden-import=mobile.charts",
     "--hidden-import=mobile.views",
     "--hidden-import=mobile.views.home",
@@ -83,6 +84,10 @@ cmd = [
     "--hidden-import=core.backtest_runner",
     "--hidden-import=core.trade_history",
     "--hidden-import=core.app_settings",
+    "--hidden-import=core.account_manager",
+    "--hidden-import=core.order_netting",
+    "--hidden-import=gui.account_manager",
+    "--hidden-import=gui.order_netting",
 ]
 
 print("실행 중... (수 분 소요될 수 있습니다)")

@@ -32,8 +32,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from gui.account_manager import AccountManager
-from gui.order_netting import calculate_order_netting
+from core.account_manager import AccountManager
+from core.order_netting import calculate_order_netting
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from strategies.vr_v5 import ValueRebalancingV5Strategy
@@ -379,6 +379,52 @@ class TestJongJongTrader(unittest.TestCase):
 
         acc_tab = build_accounts_view(mock_app)
         self.assertIsInstance(acc_tab, ft.Column)  # 계좌 없을 때 empty_home 반환
+
+    def test_tc14_widgets_and_domain_bridge(self):
+        """TC-14: 공통 위젯(mobile.widgets) 생성 및 도메인(core/gui) 브릿지 무결성 검증"""
+        import flet as ft
+        import core.account_manager as cam
+        import gui.account_manager as gam
+        import core.order_netting as con
+        import gui.order_netting as gon
+
+        # 1. core와 gui 브릿지 일치성 검증
+        self.assertIs(cam.AccountManager, gam.AccountManager)
+        self.assertIs(con.calculate_order_netting, gon.calculate_order_netting)
+        self.assertIs(con.generate_jongjong_orders, gon.generate_jongjong_orders)
+
+        # 2. mobile.widgets 컴포넌트 팩토리 검증
+        from mobile.widgets import (
+            build_card,
+            build_metric_tile,
+            build_section_header,
+            build_badge,
+            build_confirm_dialog,
+            build_empty_state,
+        )
+
+        card = build_card(content=ft.Text("Hello"), padding=10, radius=12)
+        self.assertIsInstance(card, ft.Card)
+
+        metric = build_metric_tile(title="예수금", value="$10,000", subtext="가용 현금", icon=ft.Icons.MONEY)
+        self.assertIsInstance(metric, ft.Container)
+
+        header = build_section_header(title="주문표", subtitle="안내", icon=ft.Icons.RECEIPT)
+        self.assertIsInstance(header, ft.Row)
+
+        badge = build_badge(text="SOXL")
+        self.assertIsInstance(badge, ft.Container)
+
+        confirm_dlg = build_confirm_dialog(
+            title="삭제 확인",
+            content="정말 삭제하시겠습니까?",
+            on_confirm=lambda e: None,
+            is_danger=True
+        )
+        self.assertIsInstance(confirm_dlg, ft.AlertDialog)
+
+        empty_box = build_empty_state(title="계좌 없음")
+        self.assertIsInstance(empty_box, ft.Column)
 
 
 if __name__ == "__main__":

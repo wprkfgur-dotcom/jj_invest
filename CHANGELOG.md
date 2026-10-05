@@ -4,6 +4,37 @@
 
 ---
 
+## [v2.2.1] - 2026-10-05
+
+### 🧩 UI 컴포넌트화 및 코드 중복 제거 (Refactored - Phase 3)
+- **공통 UI 위젯 모듈 신설 (`mobile/widgets.py`)**:
+  - `build_card`: 모서리 곡률(radius), 패딩, 테두리, elevation 및 터치 핸들러(`on_click`)를 일관되게 제공하는 표준 카드 팩토리
+  - `build_metric_tile`: 핵심 수치(KPI, 총예수금, 평가액 등)를 시각화하는 규격화된 메트릭 타일
+  - `build_section_header`: 아이콘, 섹션 타이틀, 서브텍스트 및 우측 부가 액션(카운터/뱃지) 통합 헤더
+  - `build_badge`: 종목 티커 태그(SOXL 등), 상태 표시용 필(Pill) 스타일 뱃지
+  - `build_confirm_dialog`: 계좌 영구 삭제, 일일 정산 Undo 등 위험/확인 모달 다이얼로그 코드 중복 제거
+  - `build_empty_state`: 데이터 부재 시 표시되는 표준 안내 화면 팩토리
+- **개별 뷰 리팩토링 및 위젯 적용**:
+  - `mobile/views/home.py`: 히어로 카드, 포트폴리오 차트 카드, 4대 지표, 계좌 비중 요약 리스트에 공통 위젯 적용
+  - `mobile/views/accounts.py`: 계좌 카드 래퍼 및 티커 뱃지 공통 컴포넌트화
+  - `mobile/views/account_detail.py`: 계좌 기본정보 카드, 매입 조각 섹션, 주문표 섹션, 일일 정산 카드 및 거래내역 헤더 적용
+  - `mobile/views/dialogs.py`: 계좌 삭제 및 Undo 확인 다이얼로그 표준화
+  - `mobile/views/strategies.py`: 가이드 섹션 헤더 및 요약 카드 표준화
+
+### 🏛️ 코어 비즈니스 로직 및 도메인 분리 (Refactored - Phase 4)
+- **`gui/` -> `core/` 비즈니스 엔진 이관**:
+  - `core/account_manager.py`: 계좌 생성/저장/로드, 입출금, 일일 정산, Undo 관리 엔진을 코어 계층으로 이관
+  - `core/order_netting.py`: LOC 주문 상계 및 퉁치기 엔진을 코어 계층으로 이관하고 변수 스코프 무결성 보강
+- **100% 하위 호환성 보장 (Backward Compatibility Bridge)**:
+  - `gui/account_manager.py` 및 `gui/order_netting.py`를 re-export 브릿지로 구성하여 기존 코드/외부 도구의 모든 import 경로 완벽 지원
+  - `mobile_app.py`, `build_mobile_exe.py`, `tools/run_app_tests.py` 등 핵심 진입점을 `core` 모듈 우선으로 전환
+
+### 🧪 테스트 스위트 확장 및 검증 (총 14개 케이스 통과)
+- **TC-14 신설**: 공통 위젯 생성 무결성 및 `core` - `gui` 브릿지 객체 동일성 검증 추가
+- 단위 테스트 14/14 통과, Windows EXE 및 Android ARM64 Release APK 듀얼 빌드 및 실기기 설치 검증 완료
+
+---
+
 ## [v2.2.0] - 2026-10-05
 
 ### 🏗️ 대규모 아키텍처 개편 (Refactored - Phase 2)
