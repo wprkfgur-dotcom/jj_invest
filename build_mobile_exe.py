@@ -41,6 +41,8 @@ temp_dist = os.path.join(current_dir, "build", "dist_mobile")
 final_dist = os.path.join(current_dir, "dist")
 os.makedirs(final_dist, exist_ok=True)
 
+from core.app_update import APP_VERSION
+
 # flet pack 명령 실행
 cmd = [
     flet_exe,
@@ -49,8 +51,8 @@ cmd = [
     "--distpath", temp_dist,
     "--name", "JongJongTrader_Mobile",
     "--product-name", "JongJong Trader",
-    "--product-version", "2.0.0",
-    "--file-version", "2.0.0.0",
+    "--product-version", APP_VERSION,
+    "--file-version", f"{APP_VERSION}.0",
     target_script,
     "--",
     "--noconsole",
@@ -69,6 +71,18 @@ cmd = [
     "--hidden-import=mobile.theme",
     "--hidden-import=mobile.helpers",
     "--hidden-import=mobile.charts",
+    "--hidden-import=mobile.views",
+    "--hidden-import=mobile.views.home",
+    "--hidden-import=mobile.views.accounts",
+    "--hidden-import=mobile.views.account_detail",
+    "--hidden-import=mobile.views.backtest",
+    "--hidden-import=mobile.views.strategies",
+    "--hidden-import=mobile.views.settings",
+    "--hidden-import=mobile.views.dialogs",
+    "--hidden-import=core.strategy_registry",
+    "--hidden-import=core.backtest_runner",
+    "--hidden-import=core.trade_history",
+    "--hidden-import=core.app_settings",
 ]
 
 print("실행 중... (수 분 소요될 수 있습니다)")

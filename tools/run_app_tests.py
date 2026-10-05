@@ -344,9 +344,46 @@ class TestJongJongTrader(unittest.TestCase):
         self.assertEqual(series['dates'][0], "01/02")
         self.assertEqual(len(series['vals']), 30)
 
+    def test_tc13_views_decomposition(self):
+        """TC-13: 모듈화된 뷰(mobile.views) 패키지 무결성 및 컴포넌트 빌드 검증"""
+        import flet as ft
+        from mobile.views import (
+            build_home_view,
+            build_empty_home_view,
+            build_accounts_view,
+            build_strategies_view,
+            build_settings_view,
+            open_add_account_dialog,
+            open_settings_dialog,
+            open_delete_account_dialog,
+            open_undo_dialog,
+            open_edit_trade_dialog,
+            open_custom_date_dialog,
+        )
+
+        # 1. 투자 전략 가이드 뷰 빌드 (독립 컴포넌트)
+        strat_view = build_strategies_view()
+        self.assertIsInstance(strat_view, ft.ListView)
+
+        # 2. Mock App 객체로 빈 계좌 뷰 및 계좌 현황 뷰 빌드
+        class MockApp:
+            def __init__(self):
+                self.accounts = []
+                self.accounts_details = []
+                self.exchange_rate = 1450.0
+                self.open_add_account_dialog = lambda *a, **k: None
+
+        mock_app = MockApp()
+        empty_home = build_empty_home_view(mock_app)
+        self.assertIsInstance(empty_home, ft.Column)
+
+        acc_tab = build_accounts_view(mock_app)
+        self.assertIsInstance(acc_tab, ft.Column)  # 계좌 없을 때 empty_home 반환
+
 
 if __name__ == "__main__":
     print("=" * 65)
     print("🚀 종종트레이더 모바일 (JongJongTrader Mobile) 기능 무결성 테스트")
     print("=" * 65)
     unittest.main(verbosity=2)
+

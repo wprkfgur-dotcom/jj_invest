@@ -4,6 +4,27 @@
 
 ---
 
+## [v2.2.0] - 2026-10-05
+
+### 🏗️ 대규모 아키텍처 개편 (Refactored - Phase 2)
+- **`mobile_app.py` 단일 거대 클래스(God Class) 완전 해체 및 라우터 전환**:
+  - 기존 4,486줄의 거대 단일 파일을 **514줄의 경량 애플리케이션 쉘/라우터로 슬림화 (-88.5% 감소)**
+  - UI 탭 화면, 모달 대화상자, 비즈니스 로직을 `mobile/views/` 패키지로 모듈화하여 분리:
+    - `mobile/views/home.py`: 홈 대시보드 히어로 카드, 인터랙티브 포트폴리오 차트, 4대 종합 지표 및 Empty State
+    - `mobile/views/accounts.py`: 계좌 현황 카드 리스트 및 플로팅 액션 버튼(FAB)
+    - `mobile/views/account_detail.py`: 계좌 기본 정보, 매입 조각 상세, 2주/금일 주문표, 일일 정산 입력 폼, 4대 섹션 거래내역 표
+    - `mobile/views/backtest.py`: 대상 종목, 기간 프리셋/직접지정, 멀티 전략 4-way 선택 폼, 시뮬레이션 연산 및 비교 차트
+    - `mobile/views/strategies.py`: 종종이/무한매수/VR 5.0 투자 전략 가이드 및 핵심 원리
+    - `mobile/views/settings.py`: CSV 내보내기/가져오기, Google Drive 클라우드 실시간 동기화, 로컬 자동 백업, 계좌 초기화
+    - `mobile/views/dialogs.py`: 신규 계좌 등록, 계좌 설정 변경, 계좌 삭제, Undo 확인, 거래 슬롯 직접 수정, 백테스트 기간 선택 모달
+- **패키징 및 빌드 스크립트 모듈러 연동 강화**:
+  - `build_mobile_exe.py`: 모듈러 뷰 패키지(`mobile.views.*`) 및 신설 코어 모듈을 PyInstaller 히든 임포트에 명시적으로 등록하고, 버전 번호를 `core.app_update`와 동기화
+  - `sync_app.py`: 재귀 디렉터리 탐색을 통해 `mobile/views`의 모든 컴포넌트가 Flutter APK 빌드 환경으로 자동 동기화되도록 보장
+- **자동화 단위 테스트 스위트 확장 (총 13대 케이스 100% 통과)**:
+  - TC-13 신설: 모듈화된 뷰(`mobile.views`) 패키지 임포트 무결성, 뷰 생성 함수 정상 호출 및 컴포넌트 반환 검증
+
+---
+
 ## [v2.1.1] - 2026-10-05
 
 ### 🐛 버그 수정 (Fixed - Phase 0)
