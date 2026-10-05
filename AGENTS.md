@@ -19,11 +19,15 @@
    - 빌드: `powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1`
    - 검증: 안드로이드 실기기(`adb install -r dist\JongJongTrader_ARM64.apk`)에서 실행, UI/터치, 업데이트 동작 확인.
 
-4. **릴리스 (Release & Git Push)**
-   - **버전 증가**: `core/app_update.py` (`APP_VERSION`, `APP_BUILD_NAME`) 및 `pubspec.yaml`
+4. **릴리스 및 버전 관리 규칙 (SemVer & Dual Release)**
+   - **버전 번호 규칙 (`MAJOR.MINOR.PATCH`)**:
+     - `MAJOR` (맨 앞 자리): 대규모 변경사항 및 구조적 개편 (예: `2.0.0` -> `3.0.0`)
+     - `MINOR` (가운데 자리): 신규 기능 추가 (예: `2.1.0` -> `2.2.0`)
+     - `PATCH` (마지막 자리): 단순 버그 픽스 및 사소한 수정 (예: `2.1.0` -> `2.1.1`)
+   - **버전 증가 대상 파일**: `core/app_update.py` (`APP_VERSION`, `APP_BUILD_NAME`) 및 `pubspec.yaml`
    - **릴리스 노트**: `CHANGELOG.md` 작성 및 GitHub Release 본문 반영
    - **Git 반영**: 작업된 모든 소스를 `origin/main`에 commit & push
-   - **APK 배포**: GitHub Releases에 최신 태그(`vX.X.X`)로 `dist\JongJongTrader_ARM64.apk` 업로드 (`python tools\publish_github_release.py`)
+   - **듀얼 배포 (APK & EXE 동시 배포)**: GitHub Releases에 최신 태그(`vX.X.X`)로 `dist\JongJongTrader_ARM64.apk`와 `dist\JongJongTrader_Mobile.exe`를 항상 함께 업로드 (`python tools\publish_github_release.py`)
    - **윈도우 실행파일 빌드**: `python build_mobile_exe.py` 실행하여 `dist\JongJongTrader_Mobile.exe` 생성.
 
 5. **디렉토리 청결 (Clean Workspace)**

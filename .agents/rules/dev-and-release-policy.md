@@ -36,10 +36,14 @@ AI 어시스턴트는 모든 작업 시 이 원칙을 최우선으로 준수해�
 
 버전 릴리스(배포) 요청이 있을 때는 다음 절차를 단계별로 누락 없이 수행합니다.
 
-### Step 1. 버전 번호 증가 (Version Bump)
+### Step 1. 버전 번호 증가 (Version Bump - SemVer 규칙 준수)
+- **버전 표기 체계 (`MAJOR.MINOR.PATCH`)**:
+  - `MAJOR` (맨 앞 자리): 대규모 변경사항, 아키텍처 개편, 호환되지 않는 큰 변경 (예: `2.x.x` -> `3.0.0`)
+  - `MINOR` (가운데 자리): 신규 전략/기능 추가 등 새로운 기능성 탑재 (예: `2.1.0` -> `2.2.0`)
+  - `PATCH` (마지막 자리): 단순 버그 픽스 및 사소한 오류 수정 (예: `2.1.0` -> `2.1.1`)
 1. `core/app_update.py`:
-   - `APP_VERSION`: 시맨틱 버저닝에 맞춰 버전 업 (예: `2.0.0` -> `2.0.1` 또는 `2.1.0`)
-   - `APP_BUILD_NAME`: 예: `"JongJong Trader v2.0.1 (ARM64 Release)"`
+   - `APP_VERSION`: 지정된 규칙에 맞춰 버전 업 (예: 버그 수정 시 `2.1.1`, 기능 추가 시 `2.2.0`, 대규모 변경 시 `3.0.0`)
+   - `APP_BUILD_NAME`: 예: `"JongJong Trader v2.1.1 (ARM64 & Windows Release)"`
 2. `flet_apk_project/build/flutter/pubspec.yaml`:
    - `version: X.X.X+N` (버전 및 빌드 번호 일치)
 
@@ -59,18 +63,18 @@ AI 어시스턴트는 모든 작업 시 이 원칙을 최우선으로 준수해�
   git push origin main
   ```
 
-### Step 4. 안드로이드 APK 및 윈도우 모바일 EXE 빌드 & 배포
+### Step 4. 안드로이드 APK 및 윈도우 모바일 EXE 동시 빌드 & 배포
 1. 릴리스용 최신 안드로이드 APK 빌드:
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1
    ```
-2. 윈도우용 모바일 실행파일 빌드 (필요시):
+2. 윈도우용 모바일 실행파일 빌드:
    ```powershell
    python build_mobile_exe.py
    ```
    *(산출물: `dist\JongJongTrader_Mobile.exe`)*
-3. GitHub Releases 배포 스크립트 실행:
-   - 태그 생성 및 빌드된 `dist\JongJongTrader_ARM64.apk` 바이너리를 첨부하여 GitHub Release 생성:
+3. GitHub Releases 배포 스크립트 실행 (APK & EXE 동시 업로드):
+   - 태그 생성 및 빌드된 `dist\JongJongTrader_ARM64.apk`와 `dist\JongJongTrader_Mobile.exe`를 함께 첨부하여 GitHub Release 생성:
      ```powershell
      python tools\publish_github_release.py --tag vX.X.X
      ```

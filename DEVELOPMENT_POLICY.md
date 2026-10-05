@@ -41,29 +41,34 @@
 
 ## 3. 릴리스 정책 (Release Workflow)
 
-릴리스 시에는 **Git 소스 반영 + 앱 버전 업 + 릴리스 노트 업데이트 + GitHub Release APK 업로드**가 한 세트로 진행됩니다.
+릴리스 시에는 **Git 소스 반영 + 앱 버전 업 + 릴리스 노트 업데이트 + GitHub Release (APK & EXE 동시 업로드)**가 한 세트로 진행됩니다.
 
 ```
 [개발 및 윈도우 모바일뷰 테스트] ──> [안드로이드 빌드 & 기기 검증]
                                               │
                                               ▼
-[버전 업 (core/app_update.py)] ────> [CHANGELOG.md 작성]
+[버전 업 (SemVer 규칙 준수)]   ────> [CHANGELOG.md 작성]
                                               │
                                               ▼
-[Git Commit & Push (origin/main)] ──> [GitHub Releases 배포 (APK 첨부)]
+[Git Commit & Push (origin/main)] ──> [윈도우 모바일 EXE 빌드]
                                               │
                                               ▼
-                             [윈도우 모바일 EXE 빌드 (build_mobile_exe.py)]
+                [GitHub Releases 듀얼 배포 (APK + EXE 동시 첨부)]
 ```
 
 ### 단계별 절차:
 
-#### 1) 버전 번호 증가 (Version Bump)
-- [core/app_update.py](file:///c:/ai_development/core/app_update.py):
-  - `APP_VERSION`: 새 버전 지정 (예: `2.0.0` -> `2.0.1` 또는 `2.1.0`)
-  - `APP_BUILD_NAME`: 예: `"JongJong Trader v2.0.1 (ARM64 Release)"`
-- [flet_apk_project/build/flutter/pubspec.yaml](file:///c:/ai_development/flet_apk_project/build/flutter/pubspec.yaml):
-  - `version: 2.0.1+2` (버전 및 빌드 번호 일치)
+#### 1) 버전 번호 증가 (Version Bump - SemVer 규칙)
+- **버전 번호 관리 체계 (`MAJOR.MINOR.PATCH`)**:
+  - **`MAJOR` (맨 앞 자리)**: 큰 변경사항, 아키텍처 개편, 대규모 마일스톤 (예: `2.x.x` -> `3.0.0`)
+  - **`MINOR` (가운데 자리)**: 새로운 전략/기능 추가 (예: `2.1.0` -> `2.2.0`)
+  - **`PATCH` (마지막 자리)**: 단순 버그 픽스 및 사소한 수정 (예: `2.1.0` -> `2.1.1`)
+- **반영 파일**:
+  - [core/app_update.py](file:///c:/ai_development/core/app_update.py):
+    - `APP_VERSION`: 새 버전 지정 (예: `2.1.1`)
+    - `APP_BUILD_NAME`: 예: `"JongJong Trader v2.1.1 (ARM64 & Windows Release)"`
+  - [flet_apk_project/build/flutter/pubspec.yaml](file:///c:/ai_development/flet_apk_project/build/flutter/pubspec.yaml):
+    - `version: X.X.X+N` (버전 및 빌드 번호 일치)
 
 #### 2) 릴리스 노트 작성 (Release Notes)
 - [CHANGELOG.md](file:///c:/ai_development/CHANGELOG.md) 파일에 신규 버전에 대한 상세 변경 내역을 작성합니다.
@@ -72,26 +77,27 @@
 - 변경된 모든 소스 코드와 문서를 Git에 커밋하고 원격 저장소에 푸시합니다:
   ```powershell
   git add .
-  git commit -m "릴리즈: vX.X.X - <요약 설명>"
+  git commit -m "chore(release): bump version to vX.X.X - <요약 설명>"
   git push origin main
   ```
 
-#### 4) 최신 APK 빌드 및 GitHub Releases 배포
-- 최신 소스가 반영된 릴리스 APK를 빌드합니다:
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1
-  ```
-- 빌드된 APK를 GitHub Releases에 업로드하여 정식 배포합니다:
-  ```powershell
-  python tools\publish_github_release.py --tag vX.X.X
-  ```
+#### 4) 최신 바이너리 빌드 (APK & EXE)
+1. 최신 소스가 반영된 안드로이드 릴리스 APK 빌드:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1
+   ```
+   *(산출물: `dist\JongJongTrader_ARM64.apk`)*
+2. 최신 소스가 반영된 윈도우용 모바일 실행파일 빌드:
+   ```powershell
+   python build_mobile_exe.py
+   ```
+   *(산출물: `dist\JongJongTrader_Mobile.exe`)*
 
-#### 5) 윈도우용 모바일 실행파일 빌드
-- PC에서도 모바일 UI로 사용을 원하는 경우 윈도우용 실행파일을 빌드합니다:
+#### 5) GitHub Releases 듀얼 배포
+- 빌드된 APK와 EXE 두 바이너리를 모두 첨부하여 GitHub Release에 동시 정식 배포합니다:
   ```powershell
-  python build_mobile_exe.py
+  python tools\publish_github_release.py vX.X.X
   ```
-  *(산출물: `dist\JongJongTrader_Mobile.exe`)*
 
 ---
 
