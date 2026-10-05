@@ -6,13 +6,18 @@ TC-3: 라오어 무한매수법 v4 주문 산출 엔진
 TC-4: 시장 시세 조회 및 SQLite DB 캐시 무결성
 TC-5: GitHub Releases 자동 업데이트 버전 체크 엔진
 TC-6: 모바일 UI 헬퍼 및 차트 SVG 생성기
+TC-7: Mobile EXE 바이너리 기동
+TC-8: VR 5.0 전략 및 주문표
+TC-9: 전략 레지스트리 (전략 판별/목표수익률/팩토리)
+TC-10: 거래내역 표 계산 (누적손익/변동률/목표가 폴백)
+TC-11: 앱 설정(환율) 영구 저장
+TC-12: 백테스트 러너 (합성 시세)
 """
 import sys
 import os
 import shutil
 import tempfile
 import unittest
-from datetime import datetime
 
 # Windows 콘솔 UTF-8 출력 보장
 if sys.platform == "win32":
@@ -34,7 +39,7 @@ from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from strategies.vr_v5 import ValueRebalancingV5Strategy
 from core.data import get_current_stock_price, get_price_from_db
 from core.app_update import APP_VERSION, check_remote_version_info, parse_download_url
-from mobile.theme import BG_DARK, ACCENT_BLUE, PROFIT_GREEN, LOSS_RED
+from mobile.theme import BG_DARK, PROFIT_GREEN, LOSS_RED
 from mobile.helpers import compute_suggested_trades, parse_picked_date_str
 from mobile.charts import render_portfolio_chart
 
@@ -210,9 +215,9 @@ class TestJongJongTrader(unittest.TestCase):
         self.assertGreater(len(buys), 0)
         self.assertGreater(len(sells), 0)
         # 매수 1차 가격은 v_min / 1000 = 72.25
-        self.assertEqual(buys[0]['price'], 72.25)
+        self.assertAlmostEqual(buys[0]['price'], v_min / 1000, places=2)
         # 매도 1차 가격은 v_max / 1000 = 97.75
-        self.assertEqual(sells[0]['price'], 97.75)
+        self.assertAlmostEqual(sells[0]['price'], v_max / 1000, places=2)
 
         # 3. AccountManager 계좌 연동 및 주문표 산출 검증
         am = AccountManager(filepath=self.test_accounts_file)
@@ -229,6 +234,115 @@ class TestJongJongTrader(unittest.TestCase):
         self.assertIn("buy_orders", dtl)
         self.assertIn("sell_orders", dtl)
         self.assertGreater(len(dtl['buy_orders']), 0)
+
+    def test_tc9_strategy_registry(self):
+        """TC-9: 전략 이름 판별, 목표 수익률, 백테스트 전략 팩토리 검증"""
+        from core import strategy_registry as reg
+        from strategies.buy_and_hold import BuyAndHoldStrategy
+
+        self.assertEqual(reg.classify_strategy("종종이 기본전략"), reg.JONGJONG)
+        self.assertEqual(reg.classify_strategy("종종이 (LOC 4분할)"), reg.JONGJONG)
+        self.assertEqual(reg.classify_strategy("무한매수법 v4.0"), reg.INFINITE)
+        self.assertEqual(reg.classify_strategy("VR 5.0 (밸류리밸런싱)"), reg.VR)
+        self.assertEqual(reg.classify_strategy("vr 5.0"), reg.VR)
+        self.assertEqual(reg.classify_strategy("SOXL 단순보유(B&H)"), reg.BNH)
+        self.assertEqual(reg.classify_strategy(None), reg.BNH)
+
+        self.assertEqual(reg.get_target_yield("종종이 기본전략"), 0.0275)
+        self.assertEqual(reg.get_target_yield("무한매수법 v4.0"), 0.05)
+
+        self.assertIsInstance(reg.create_backtest_strategy(reg.DISPLAY_NAMES[reg.JONGJONG], "SOXL", 1000.0), JongJongStrategy)
+        self.assertIsInstance(reg.create_backtest_strategy(reg.DISPLAY_NAMES[reg.INFINITE], "SOXL", 1000.0), InfiniteBuyingV4Strategy)
+        self.assertIsInstance(reg.create_backtest_strategy(reg.DISPLAY_NAMES[reg.VR], "TQQQ", 1000.0), ValueRebalancingV5Strategy)
+        self.assertIsInstance(reg.create_backtest_strategy(reg.bnh_display_name("SOXL"), "SOXL", 1000.0), BuyAndHoldStrategy)
+
+    def test_tc10_trade_history_rows(self):
+        """TC-10: 거래내역 표 계산 (누적손익, 변동률, 보유일, 목표가 폴백) 검증"""
+        from core.trade_history import build_trade_rows, format_kr_date
+
+        self.assertEqual(format_kr_date("2026-09-28"), "09.28.(월)")
+        self.assertEqual(format_kr_date(None), "-")
+
+        records = [
+            {'t': 0, 'Date': '2026-09-28', 'Close': 142.29, 'Mode': 'Normal', 'BuyQty': 304, 'U': 146.21,
+             'Sold': True, 'W': '2026-09-29', 'X': 147.00, 'Profit': 1431.84, 'ProfitRate': 3.3},
+            {'t': 1, 'Date': '2026-09-29', 'Close': 147.00, 'Mode': 'Normal', 'BuyQty': 304, 'U': 151.05,
+             'Sold': True, 'W': '2026-10-01', 'X': 153.69, 'Profit': 2033.76},
+            # 목표가(U) 없는 미매도 슬롯: 기존에는 round_up NameError 로 화면 크래시
+            {'t': 2, 'Date': '2026-09-30', 'Close': 100.00, 'Mode': 'Safe', 'BuyQty': 10, 'U': None, 'Sold': False},
+        ]
+        rows = build_trade_rows(records, "종종이 기본전략")
+        self.assertEqual([r['idx'] for r in rows], [2, 1, 0])  # 최신순
+
+        newest, middle, oldest = rows
+        # 목표가 폴백: 100 * 1.0275 = 102.75
+        self.assertAlmostEqual(newest['target_price'], 102.75, places=2)
+        self.assertTrue(newest['is_holding'])
+        self.assertEqual(newest['sell_date_str'], "보유중(0d)")
+        self.assertEqual(newest['profit_str'], "-")
+        self.assertIsNone(newest['cum_profit'])
+        self.assertEqual(newest['mode'], 'Safe')
+
+        # 변동률: Chg 값이 없으면 전일 종가 기준으로 계산
+        self.assertAlmostEqual(middle['chg'], 147.00 / 142.29 - 1.0, places=6)
+        self.assertEqual(middle['chg_str'], "+3.31%")
+        # 손익률 폴백: BuyPrice 없으면 종가 기준 (153.69/147 - 1)
+        self.assertEqual(middle['profit_rate_str'], "+4.6%")
+        # 누적손익
+        self.assertAlmostEqual(middle['cum_profit'], 1431.84 + 2033.76, places=2)
+        self.assertEqual(middle['cum_str'], "+3,466$")
+
+        # 첫 행: 이전 행이 없으므로 변동률 '-' (기존에는 records[-1] 을 참조하던 버그)
+        self.assertEqual(oldest['chg_str'], "-")
+        self.assertEqual(oldest['sell_date_str'], "09.29.(화)")
+        self.assertEqual(oldest['sell_price_str'], "$147.00")
+        self.assertEqual(oldest['profit_rate_str'], "+3.3%")
+
+        self.assertEqual(build_trade_rows([], "종종이"), [])
+
+    def test_tc11_app_settings_exchange_rate(self):
+        """TC-11: 기준 환율 저장/로드 영속성 및 잘못된 값 방어 검증"""
+        from core.app_settings import get_exchange_rate, set_exchange_rate, DEFAULT_EXCHANGE_RATE
+
+        path = os.path.join(self.test_dir, "app_settings.json")
+        self.assertEqual(get_exchange_rate(path), DEFAULT_EXCHANGE_RATE)
+        set_exchange_rate(1450, path)
+        self.assertEqual(get_exchange_rate(path), 1450.0)
+        with self.assertRaises(ValueError):
+            set_exchange_rate(0, path)
+        self.assertEqual(get_exchange_rate(path), 1450.0)
+
+        # 손상된 파일은 기본값으로 복구
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{broken")
+        self.assertEqual(get_exchange_rate(path), DEFAULT_EXCHANGE_RATE)
+
+    def test_tc12_backtest_runner(self):
+        """TC-12: 백테스트 러너 (합성 시세로 단순보유 실행 + 차트 시리즈) 검증"""
+        import pandas as pd
+        from core.backtest_runner import run_strategies, build_chart_series
+        from core.strategy_registry import bnh_display_name
+
+        dates = pd.bdate_range("2025-01-02", periods=30)
+        df = pd.DataFrame({'Date': dates, 'Close': [100.0 + i for i in range(30)]})
+        df['Open'] = df['Close']
+        df['High'] = df['Close']
+        df['Low'] = df['Close']
+
+        progress = []
+        results = run_strategies(df, "TEST", 10000.0, "2025-01-02", "2025-12-31",
+                                 [bnh_display_name("TEST")], on_progress=progress.append)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(progress, [bnh_display_name("TEST")])
+        res = results[0]
+        self.assertEqual(len(res['df']), 30)
+        self.assertIsInstance(res['metrics'], dict)
+        self.assertGreater(res['df']['Asset'].iloc[-1], 10000.0)  # 우상향 시세 → 수익
+
+        series = build_chart_series(res['df'])
+        self.assertEqual(len(series['dates']), 30)
+        self.assertEqual(series['dates'][0], "01/02")
+        self.assertEqual(len(series['vals']), 30)
 
 
 if __name__ == "__main__":

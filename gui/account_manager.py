@@ -858,7 +858,6 @@ class AccountManager:
             band_pct = float(acc.get('band_pct', 0.15))
             pool_usage_limit = float(acc.get('pool_usage_limit', 0.50))
             num_recs = len(df_res)
-            cycle_num = (num_recs // 10) + 1
             day_in_cycle = (num_recs % 10) + 1
             mode = f"2주 {day_in_cycle}/10일차"
 

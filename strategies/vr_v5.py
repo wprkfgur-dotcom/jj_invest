@@ -26,7 +26,6 @@
 """
 from typing import List, Dict, Any, Tuple
 import pandas as pd
-import numpy as np
 from .base import BaseStrategy
 
 

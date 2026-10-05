@@ -14,7 +14,6 @@ import os
 import subprocess
 import threading
 from datetime import datetime, timedelta
-import pandas as pd
 
 # UTF-8 출력 보장
 if sys.platform == "win32":
@@ -32,11 +31,11 @@ import flet as ft
 
 from gui.account_manager import AccountManager
 from core.data import fetch_market_data, get_db_date_range
-from core.metrics import calculate_metrics
-from strategies.jongjong import JongJongStrategy
-from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
-from strategies.vr_v5 import ValueRebalancingV5Strategy
-from strategies.buy_and_hold import BuyAndHoldStrategy
+from core.strategy_registry import (
+    JONGJONG, INFINITE, VR, DISPLAY_NAMES, ACCOUNT_STRATEGY_OPTIONS, bnh_display_name, is_vr,
+)
+from core.backtest_runner import run_strategies, build_chart_series
+from core.trade_history import build_trade_rows
 from core.cloud_sync import (
     get_sync_config, save_sync_config, is_sync_enabled,
     test_connection, upload_accounts_to_drive, download_accounts_from_drive,
@@ -59,14 +58,14 @@ from mobile.helpers import (
 )
 from mobile.charts import render_portfolio_chart, render_multi_backtest_chart
 from core.data import get_stock_price_for_date
-
-EXCHANGE_RATE = 1380.0        # USD/KRW ?? ??
+from core.app_settings import get_exchange_rate, set_exchange_rate
 
 
 class MobileTradingApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.am = AccountManager()
+        self.exchange_rate = get_exchange_rate()  # 기준 환율 (1 USD = N 원), data/app_settings.json에 저장
         self.accounts = []
         self.accounts_details = []
         self.current_tab_index = 0       # 0: 홈, 1: 계좌 현황, 2: 백테스트, 3: 투자 전략, 4: 설정
@@ -321,7 +320,7 @@ class MobileTradingApp:
         idx = int(round(ratio * (len(self.home_chart_dates) - 1)))
         dt = self.home_chart_dates[idx]
         val = self.home_chart_vals[idx]
-        krw_text = f"약 {val * EXCHANGE_RATE / 1e8:.2f}억원"
+        krw_text = f"약 {val * self.exchange_rate / 1e8:.2f}억원"
         first_val = self.home_chart_vals[0] if self.home_chart_vals else val
         is_up = val >= first_val
 
@@ -637,7 +636,7 @@ class MobileTradingApp:
         tot_ar = sum(d.get('ar_val', 0.0) for d in self.accounts_details)
         tot_stock_val = max(0.0, tot_asset - tot_cash)
 
-        krw_asset = tot_asset * EXCHANGE_RATE
+        krw_asset = tot_asset * self.exchange_rate
         is_profit = tot_profit >= 0
         p_color = PROFIT_GREEN if is_profit else LOSS_RED
         p_icon = ft.Icons.ARROW_DROP_UP if is_profit else ft.Icons.ARROW_DROP_DOWN
@@ -665,7 +664,7 @@ class MobileTradingApp:
                         ),
                         ft.Container(height=4),
                         ft.Text(f"${tot_asset:,.2f}", size=32, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                        ft.Text(f"약 {krw_asset:,.0f}원 (환율 {EXCHANGE_RATE:,.0f}원)", size=12, color=TEXT_MUTED),
+                        ft.Text(f"약 {krw_asset:,.0f}원 (환율 {self.exchange_rate:,.0f}원)", size=12, color=TEXT_MUTED),
                         ft.Container(height=8),
                         ft.Divider(color=BORDER_COLOR, height=1),
                         ft.Container(height=4),
@@ -1055,7 +1054,7 @@ class MobileTradingApp:
                                 ft.Column(
                                     controls=[
                                         ft.Text(f"{name} ({ticker})", size=16, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
-                                        ft.Text(f"{strat} • {mode} (2주 리밸런싱)" if 'VR' in strat.upper() else f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=VR_PURPLE if 'VR' in strat.upper() else TEXT_SECONDARY)
+                                        ft.Text(f"{strat} • {mode} (2주 리밸런싱)" if is_vr(strat) else f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=VR_PURPLE if is_vr(strat) else TEXT_SECONDARY)
                                     ],
                                     spacing=2
                                 ),
@@ -1082,19 +1081,19 @@ class MobileTradingApp:
                         ft.Row(
                             controls=[
                                 ft.Column([
-                                    ft.Text("2주 사이클" if 'VR' in strat.upper() else "위기준비금 (AK)", size=10, color=VR_PURPLE if 'VR' in strat.upper() else RESERVE_AMBER),
-                                    ft.Text(f"{mode}" if 'VR' in strat.upper() else f"${ak_val:,.0f}", size=13 if 'VR' in strat.upper() else 14, weight=ft.FontWeight.BOLD, color=VR_PURPLE if 'VR' in strat.upper() else RESERVE_AMBER)
+                                    ft.Text("2주 사이클" if is_vr(strat) else "위기준비금 (AK)", size=10, color=VR_PURPLE if is_vr(strat) else RESERVE_AMBER),
+                                    ft.Text(f"{mode}" if is_vr(strat) else f"${ak_val:,.0f}", size=13 if is_vr(strat) else 14, weight=ft.FontWeight.BOLD, color=VR_PURPLE if is_vr(strat) else RESERVE_AMBER)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("보유 수량" if 'VR' in strat.upper() else "실가동시드 (AR)", size=10, color=ACCENT_BLUE),
-                                    ft.Text(f"{hold:,}주" if 'VR' in strat.upper() else f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                                    ft.Text("보유 수량" if is_vr(strat) else "실가동시드 (AR)", size=10, color=ACCENT_BLUE),
+                                    ft.Text(f"{hold:,}주" if is_vr(strat) else f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("가용 Pool 예산" if 'VR' in strat.upper() else "하루 배분 예산", size=10, color=TEXT_SECONDARY),
+                                    ft.Text("가용 Pool 예산" if is_vr(strat) else "하루 배분 예산", size=10, color=TEXT_SECONDARY),
                                     ft.Text(f"${budget:,.2f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                                 ], spacing=1),
                                 ft.Column([
-                                    ft.Text("예수금 (Pool)" if 'VR' in strat.upper() else "예수금", size=10, color=TEXT_SECONDARY),
+                                    ft.Text("예수금 (Pool)" if is_vr(strat) else "예수금", size=10, color=TEXT_SECONDARY),
                                     ft.Text(f"${cash:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN)
                                 ], spacing=1),
                             ],
@@ -1196,7 +1195,7 @@ class MobileTradingApp:
                 )
             )
 
-        if 'VR' in strat.upper():
+        if is_vr(strat):
             holdings_section = ft.Container(
                 bgcolor=SURFACE_CARD,
                 border=ft.Border.all(1, ft.Colors.with_opacity(0.35, VR_PURPLE)),
@@ -1308,7 +1307,7 @@ class MobileTradingApp:
                         controls=[
                             ft.Row([
                                 ft.Icon(ft.Icons.ARROW_UPWARD, color=LOSS_RED, size=16),
-                                ft.Text("🔴 2주 매도 예약 (상단 밴드)" if 'VR' in strat.upper() else "🔴 매도 주문", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
+                                ft.Text("🔴 2주 매도 예약 (상단 밴드)" if is_vr(strat) else "🔴 매도 주문", size=13, weight=ft.FontWeight.BOLD, color=LOSS_RED),
                             ], spacing=6),
                             ft.Container(
                                 content=ft.Text(f"총 {total_sell_qty:,}주" if total_sell_qty > 0 else "0건", size=10, color=LOSS_RED, weight=ft.FontWeight.BOLD),
@@ -1375,7 +1374,7 @@ class MobileTradingApp:
                         controls=[
                             ft.Row([
                                 ft.Icon(ft.Icons.ARROW_DOWNWARD, color=PROFIT_GREEN, size=16),
-                                ft.Text("🟢 2주 매수 예약 (하단 밴드)" if 'VR' in strat.upper() else "🟢 매수 주문", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
+                                ft.Text("🟢 2주 매수 예약 (하단 밴드)" if is_vr(strat) else "🟢 매수 주문", size=13, weight=ft.FontWeight.BOLD, color=PROFIT_GREEN),
                             ], spacing=6),
                             ft.Container(
                                 content=ft.Text(f"총 {total_buy_qty:,}주" if total_buy_qty > 0 else "0건", size=10, color=PROFIT_GREEN, weight=ft.FontWeight.BOLD),
@@ -1624,94 +1623,35 @@ class MobileTradingApp:
         # -------------------------------------------------------------
         table_rows = []
         if records:
-            # 1. 누적 실현손익 사전 계산 (시간순 t=0부터)
-            cum_profits = {}
-            running_cum = 0.0
-            for i, rec in enumerate(records):
-                is_s = bool(rec.get('Sold', False))
-                p_val = rec.get('Profit')
-                if is_s and p_val is not None:
-                    try:
-                        running_cum += float(p_val)
-                        cum_profits[i] = running_cum
-                    except Exception:
-                        cum_profits[i] = running_cum
-                else:
-                    cum_profits[i] = None
-
-            for orig_idx, r in reversed(list(enumerate(records))):
-                r_d = str(r.get('Date', ''))
-                r_d_kr = format_kr_date(r_d)
-                r_cp = float(r.get('Close', 0.0))
-
-                # 변동률 계산
-                chg_val = r.get('Chg')
-                if chg_val is None or (chg_val == 0.0 and orig_idx > 0):
-                    prev_close = float(records[orig_idx - 1].get('Close', 0.0))
-                    if prev_close > 0:
-                        chg_val = (r_cp / prev_close - 1.0)
-                    else:
-                        chg_val = 0.0
-                try:
-                    chg_f = float(chg_val)
-                except Exception:
-                    chg_f = 0.0
-                chg_str = f"{chg_f * 100:+.2f}%" if (orig_idx > 0 or chg_f != 0.0) else "-"
+            # 계산(누적손익/변동률/목표가/손익률)은 core.trade_history 에서 수행, 여기서는 표현(색상/위젯)만 담당
+            for row in build_trade_rows(records, strat):
+                orig_idx = row['idx']
+                r_d_kr = row['date_kr']
+                r_cp = row['close']
+                chg_f = row['chg']
+                chg_str = row['chg_str']
                 chg_color = LOSS_RED if chg_f > 0 else (ACCENT_BLUE if chg_f < 0 else TEXT_MUTED)
 
                 # 시장 모드
-                r_mode = str(r.get('Mode', 'Normal'))
+                r_mode = row['mode']
                 mode_color = "#3B82F6" if r_mode == 'Normal' else ("#EAB308" if r_mode == 'Safe' else "#EF4444")
 
-                # 매수 정보
-                r_bq = int(r.get('BuyQty', r.get('R', 0)))
-                r_u = float(r.get('U', 0.0)) if r.get('U') is not None else 0.0
-                if r_u == 0.0 and r_bq > 0:
-                    t_y = 0.0275 if '종종이' in strat else 0.05
-                    r_u = round_up(r_cp * (1.0 + t_y), 2)
-
-                # 매도 정보
-                is_sold = bool(r.get('Sold', False)) and (r.get('W') is not None)
-                if is_sold:
-                    r_wd = format_kr_date(r.get('W'))
-                    r_sp = float(r.get('X', 0.0))
-                    sell_price_str = f"${r_sp:.2f}"
-                else:
-                    if r_bq > 0:
-                        h_days = len(records) - 1 - int(r.get('t', orig_idx))
-                        r_wd = f"보유중({h_days}d)"
-                    else:
-                        r_wd = "-"
-                    sell_price_str = "-"
+                # 매수 / 매도 정보
+                r_bq = row['buy_qty']
+                r_u = row['target_price']
+                r_wd = row['sell_date_str']
+                sell_price_str = row['sell_price_str']
 
                 # 손익 정보
-                r_p = r.get('Profit')
-                if is_sold and r_p is not None:
-                    p_num = float(r_p)
-                    profit_str = f"{p_num:+,.0f}$"
-                    profit_color = PROFIT_GREEN if p_num >= 0 else LOSS_RED
-
-                    # 손익률
-                    r_pr = r.get('ProfitRate')
-                    if r_pr is not None:
-                        pr_num = float(r_pr)
-                    else:
-                        bp = float(r.get('BuyPrice', r_cp))
-                        pr_num = ((r_sp / bp - 1.0) * 100.0) if (bp > 0 and r_sp > 0) else 0.0
-                    pr_str = f"{pr_num:+.1f}%"
-                else:
-                    profit_str = "-"
-                    profit_color = TEXT_MUTED
-                    pr_str = "-"
+                profit_str = row['profit_str']
+                pr_str = row['profit_rate_str']
+                p_num = row['profit']
+                profit_color = TEXT_MUTED if p_num is None else (PROFIT_GREEN if p_num >= 0 else LOSS_RED)
 
                 # 누적손익
-                cum_num = cum_profits.get(orig_idx)
-                if cum_num is not None:
-                    cum_str = f"{cum_num:+,.0f}$"
-                    cum_color = PROFIT_GREEN if cum_num >= 0 else LOSS_RED
-                else:
-                    cum_str = "-"
-                    cum_color = TEXT_MUTED
+                cum_str = row['cum_str']
+                cum_num = row['cum_profit']
+                cum_color = TEXT_MUTED if cum_num is None else (PROFIT_GREEN if cum_num >= 0 else LOSS_RED)
 
                 def make_edit_fn(idx_to_edit):
                     return lambda _: self.open_edit_trade_dialog(acc_id, idx_to_edit)
@@ -2191,13 +2131,13 @@ class MobileTradingApp:
 
             selected_strats = []
             if cb_jongjong.value:
-                selected_strats.append(('종종이 기본전략', PROFIT_GREEN, False))
+                selected_strats.append((DISPLAY_NAMES[JONGJONG], PROFIT_GREEN, False))
             if cb_infinite.value:
-                selected_strats.append(('무한매수법 v4.0', RESERVE_AMBER, False))
+                selected_strats.append((DISPLAY_NAMES[INFINITE], RESERVE_AMBER, False))
             if cb_vr.value:
-                selected_strats.append(('VR 5.0 (밸류리밸런싱)', VR_PURPLE, False))
+                selected_strats.append((DISPLAY_NAMES[VR], VR_PURPLE, False))
             if cb_bnh.value:
-                selected_strats.append((f'{t} 단순보유(B&H)', ACCENT_BLUE, True))
+                selected_strats.append((bnh_display_name(t), ACCENT_BLUE, True))
 
             if not selected_strats:
                 show_toast(self.page, "비교 검증할 전략을 최소 1개 이상 선택해주세요.", is_error=True)
@@ -2345,36 +2285,18 @@ class MobileTradingApp:
                     loading_sub_text.value = f"총 {len(selected_strats)}개 전략의 조각 매수/익절/시간손절을 계산 중입니다."
                     self.page.update()
 
-                    multi_results = []
+                    multi_results = run_strategies(
+                        df_market, t, cap, s_date, e_date,
+                        [name for name, _, _ in selected_strats]
+                    )
                     series_for_chart = []
-
-                    for strat_name, color, is_dash in selected_strats:
-                        if "종종이" in strat_name:
-                            st = JongJongStrategy(initial_capital=cap, reserve_ratio=0.05)
-                        elif "무한" in strat_name:
-                            st = InfiniteBuyingV4Strategy(ticker=t, initial_capital=cap, divisions=40)
-                        elif "VR" in strat_name:
-                            st = ValueRebalancingV5Strategy(ticker=t, initial_capital=cap, g_value=10.0, band_pct=0.15)
-                        else:
-                            st = BuyAndHoldStrategy(name=f"{t} 단순보유", initial_capital=cap)
-
-                        df_s = st.run(df_market, s_date, e_date)
-                        m_s = calculate_metrics(df_s, cap)
-
-                        multi_results.append({
-                            'name': strat_name,
-                            'color': color,
-                            'metrics': m_s,
-                            'df': df_s
-                        })
-
-                        date_fmt = '%y/%m' if len(df_s) > 365 else '%m/%d'
+                    for res, (strat_name, color, is_dash) in zip(multi_results, selected_strats):
+                        res['color'] = color
                         series_for_chart.append({
                             'name': strat_name,
                             'color': color,
                             'dash': is_dash,
-                            'dates': [pd.to_datetime(d).strftime(date_fmt) for d in df_s['Date']],
-                            'vals': df_s['Asset'].values.tolist()
+                            **build_chart_series(res['df'])
                         })
 
                     # 3. 차트 렌더링
@@ -3409,7 +3331,7 @@ class MobileTradingApp:
         # 3. 환율 설정 카드
         rate_field = ft.TextField(
             label="기준 환율 (1 USD = N 원)",
-            value=f"{EXCHANGE_RATE:.0f}",
+            value=f"{self.exchange_rate:.0f}",
             keyboard_type=ft.KeyboardType.NUMBER,
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
@@ -3420,13 +3342,10 @@ class MobileTradingApp:
         )
 
         def handle_save_rate(e):
-            global EXCHANGE_RATE
             try:
-                new_rate = float(rate_field.value.strip())
-                if new_rate > 0:
-                    EXCHANGE_RATE = new_rate
-                    show_toast(self.page, f"기준 환율이 {EXCHANGE_RATE:,.0f}원으로 변경되었습니다.")
-                    self.reload_data()
+                self.exchange_rate = set_exchange_rate(float(rate_field.value.strip()))
+                show_toast(self.page, f"기준 환율이 {self.exchange_rate:,.0f}원으로 변경되었습니다.")
+                self.reload_data()
             except Exception:
                 show_toast(self.page, "올바른 환율 숫자를 입력하세요.", is_error=True)
 
@@ -4091,7 +4010,7 @@ class MobileTradingApp:
         strat_f = ft.Dropdown(
             label="전략 선택",
             value="종종이 기본전략",
-            options=[ft.dropdown.Option("종종이 기본전략"), ft.dropdown.Option("무한매수법 v4.0"), ft.dropdown.Option("VR 5.0 (밸류리밸런싱)")],
+            options=[ft.dropdown.Option(o) for o in ACCOUNT_STRATEGY_OPTIONS],
             border_color=BORDER_COLOR,
             focused_border_color=ACCENT_BLUE,
             color=TEXT_PRIMARY

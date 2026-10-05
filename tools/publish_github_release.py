@@ -17,7 +17,7 @@ if sys.stdout.encoding != 'utf-8':
 
 
 REPO = "wprkfgur-dotcom/jj_invest"
-DEFAULT_TAG = "v2.1.0"
+DEFAULT_TAG = "v2.1.1"
 DEFAULT_FILES = [
     r"C:\ai_development\dist\JongJongTrader_ARM64.apk",
     r"C:\ai_development\dist\JongJongTrader_Mobile.exe"
@@ -56,23 +56,20 @@ def publish_release(tag: str = DEFAULT_TAG, files: list = None, title: str = Non
         title = f"JongJong Trader {tag} (ARM64 & Windows Release)"
     if not notes:
         notes = (
-            f"## 🚀 JongJong Trader {tag} 정식 릴리즈\n\n"
-            f"- **배포 바이너리**:\n"
+            f"## 🚀 JongJong Trader {tag} 패치 릴리즈\n\n"
+            f"- **배포 바이너리 (듀얼 배포)**:\n"
             f"  - 📱 안드로이드 실기기: `JongJongTrader_ARM64.apk`\n"
             f"  - 💻 윈도우 모바일 뷰: `JongJongTrader_Mobile.exe`\n\n"
-            f"- **주요 업데이트 내역**:\n"
-            f"  - **라오어 밸류리밸런싱 (VR 5.0) 투자 전략 신규 탑재**\n"
-            f"    - 2주(10거래일) 결산 주기 및 공식 ($V_2 = V_1 + Pool/G \\pm 적립금$) 자동 리밸런싱\n"
-            f"    - $\\pm 15\\%$ 최소/최대 밴드 이탈 방지용 2주 기간예약 주문 사다리 자동 산출\n"
-            f"    - 백테스트 4-way 멀티 전략 비교 (종종이, 무한매수, VR 5.0, Buy&Hold)\n"
-            f"    - 신규 계좌 생성 시 'VR 5.0 (밸류리밸런싱)' 및 2주 진행도 표시 지원\n"
-            f"  - **거래 슬롯별 상세 내역 (4대 섹션) 엑셀형 표 전면 개편**\n"
-            f"    - 한 행 = 하나의 매수 슬롯(Lot) 라이프사이클 모델 (중복 매도량 제거)\n"
-            f"    - 4대 섹션 콤마 구분 헤더: `[시장 정보] , [매수] , [매도] , [손익]`\n"
-            f"    - 한국식 요일 포함 날짜 포맷팅 (`09.28.(월)`) 적용\n"
-            f"    - 미매도 슬롯의 실현손익을 공란(`-`)으로 안전 격리하고 청산 시점 자동 추적 정산\n"
-            f"    - 슬롯별 정보 직접 수정 모달 다이얼로그 4대 섹션 개편\n"
-            f"  - **자동화 테스트 스위트 강화**: TC-1 ~ TC-8 (전체 8개 무결성 테스트 통과)\n"
+            f"- **주요 패치 및 리팩토링 내역**:\n"
+            f"  - 🐛 **결함 수정 (Phase 0)**:\n"
+            f"    - 미정의 함수 호출로 인한 크래시 수정 (`round_up` NameError 해결)\n"
+            f"    - 공개 배포 APK 내 개인 계좌 데이터(`accounts.json`) 번들링 방지 및 제외\n"
+            f"    - 기준 환율 영구성 보장 (`core/app_settings.py` 저장 지원)\n"
+            f"  - ⚙️ **코드 리팩토링 (Phase 1)**:\n"
+            f"    - 전략 판별 및 팩토리 로직을 `core/strategy_registry.py`로 일원화\n"
+            f"    - 백테스트 실행 엔진을 `core/backtest_runner.py`로 분리\n"
+            f"    - 거래내역 4섹션 표 계산 로직을 `core/trade_history.py`로 분리\n"
+            f"    - 자동화 테스트 스위트 확장 (총 12/12 테스트 전체 PASS)\n"
         )
 
     # 1. 릴리즈 존재 확인 또는 생성

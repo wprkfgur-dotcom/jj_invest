@@ -7,6 +7,7 @@ import pandas as pd
 import flet as ft
 
 from mobile.theme import LOSS_RED, PROFIT_GREEN
+from core.strategy_registry import get_target_yield
 
 
 def copy_text_to_clipboard(page: ft.Page, text: str):
@@ -173,7 +174,7 @@ def compute_suggested_trades(
             u_val = lot.get('U')
             if u_val is None or pd.isna(u_val):
                 bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
-                t_yield = 0.0275 if '종종이' in strategy_name else 0.05
+                t_yield = get_target_yield(strategy_name)
                 u_val = bp * (1.0 + t_yield)
             else:
                 u_val = float(u_val)
@@ -251,18 +252,8 @@ def extract_pct_str(order: dict, ref_price: float) -> str:
     return ""
 
 
-def format_kr_date(date_val) -> str:
-    """
-    날짜를 한국식 요일 포함 포맷('MM.DD.(요일)')으로 변환합니다.
-    예: '2026-09-28' -> '09.28.(월)'
-    """
-    if not date_val:
-        return "-"
-    try:
-        s = str(date_val).strip()[:10]
-        dt = datetime.strptime(s, "%Y-%m-%d")
-        weekdays = ["월", "화", "수", "목", "금", "토", "일"]
-        return f"{dt.strftime('%m.%d.')}({weekdays[dt.weekday()]})"
-    except Exception:
-        return str(date_val)[:10]
+# format_kr_date 는 core.trade_history 로 이관되었습니다 (하위 호환용 재노출)
+from core.trade_history import format_kr_date
+
+__all__ = ["format_kr_date"]
 

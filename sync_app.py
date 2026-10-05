@@ -76,7 +76,12 @@ if os.path.exists(data_src):
     d_target = os.path.join(FLET_PYTHON_APP, "data")
     if os.path.exists(os.path.dirname(d_target)):
         os.makedirs(d_target, exist_ok=True)
-        for f in ["accounts.json", "accounts.example.json", "market_data.db"]:
+        # 주의: 개인 계좌 데이터(accounts.json)는 공개 배포 APK에 절대 포함하지 않음
+        stale = os.path.join(d_target, "accounts.json")
+        if os.path.exists(stale):
+            os.remove(stale)
+            print("   Removed bundled data/accounts.json (privacy)")
+        for f in ["accounts.example.json", "market_data.db"]:
             sf = os.path.join(data_src, f)
             if os.path.exists(sf):
                 shutil.copy2(sf, os.path.join(d_target, f))
