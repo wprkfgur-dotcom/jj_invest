@@ -16,8 +16,10 @@ if sys.stdout.encoding != 'utf-8':
         pass
 
 
+from core.app_update import APP_VERSION
+
 REPO = "wprkfgur-dotcom/jj_invest"
-DEFAULT_TAG = "v2.1.1"
+DEFAULT_TAG = f"v{APP_VERSION}"
 DEFAULT_FILES = [
     r"C:\ai_development\dist\JongJongTrader_ARM64.apk",
     r"C:\ai_development\dist\JongJongTrader_Mobile.exe"
@@ -41,6 +43,28 @@ def get_github_token() -> str:
     raise RuntimeError("GitHub 인증 토큰을 찾을 수 없습니다.")
 
 
+def get_changelog_notes_for_tag(tag: str) -> str:
+    """CHANGELOG.md에서 해당 태그의 릴리즈 노트를 추출합니다."""
+    changelog_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CHANGELOG.md")
+    if not os.path.exists(changelog_path):
+        return ""
+    try:
+        with open(changelog_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        target_header = f"## [{tag}]"
+        if target_header not in content:
+            return ""
+        start = content.find(target_header)
+        end = content.find("\n## [", start + len(target_header))
+        if end != -1:
+            notes = content[start:end].strip()
+        else:
+            notes = content[start:].strip()
+        return notes
+    except Exception:
+        return ""
+
+
 def publish_release(tag: str = DEFAULT_TAG, files: list = None, title: str = None, notes: str = None):
     token = get_github_token()
     headers = {
@@ -53,24 +77,23 @@ def publish_release(tag: str = DEFAULT_TAG, files: list = None, title: str = Non
         files = DEFAULT_FILES
 
     if not title:
-        title = f"JongJong Trader {tag} (ARM64 & Windows Release)"
+        title = f"JongJong Trader {tag} (Modular Views Architecture - Dual Release)"
     if not notes:
-        notes = (
-            f"## 🚀 JongJong Trader {tag} 패치 릴리즈\n\n"
-            f"- **배포 바이너리 (듀얼 배포)**:\n"
-            f"  - 📱 안드로이드 실기기: `JongJongTrader_ARM64.apk`\n"
-            f"  - 💻 윈도우 모바일 뷰: `JongJongTrader_Mobile.exe`\n\n"
-            f"- **주요 패치 및 리팩토링 내역**:\n"
-            f"  - 🐛 **결함 수정 (Phase 0)**:\n"
-            f"    - 미정의 함수 호출로 인한 크래시 수정 (`round_up` NameError 해결)\n"
-            f"    - 공개 배포 APK 내 개인 계좌 데이터(`accounts.json`) 번들링 방지 및 제외\n"
-            f"    - 기준 환율 영구성 보장 (`core/app_settings.py` 저장 지원)\n"
-            f"  - ⚙️ **코드 리팩토링 (Phase 1)**:\n"
-            f"    - 전략 판별 및 팩토리 로직을 `core/strategy_registry.py`로 일원화\n"
-            f"    - 백테스트 실행 엔진을 `core/backtest_runner.py`로 분리\n"
-            f"    - 거래내역 4섹션 표 계산 로직을 `core/trade_history.py`로 분리\n"
-            f"    - 자동화 테스트 스위트 확장 (총 12/12 테스트 전체 PASS)\n"
-        )
+        cl_notes = get_changelog_notes_for_tag(tag)
+        if cl_notes:
+            notes = (
+                f"{cl_notes}\n\n"
+                f"- **배포 바이너리 (듀얼 배포)**:\n"
+                f"  - 📱 안드로이드 실기기: `JongJongTrader_ARM64.apk`\n"
+                f"  - 💻 윈도우 모바일 뷰: `JongJongTrader_Mobile.exe`\n"
+            )
+        else:
+            notes = (
+                f"## 🚀 JongJong Trader {tag} 릴리즈\n\n"
+                f"- **배포 바이너리 (듀얼 배포)**:\n"
+                f"  - 📱 안드로이드 실기기: `JongJongTrader_ARM64.apk`\n"
+                f"  - 💻 윈도우 모바일 뷰: `JongJongTrader_Mobile.exe`\n"
+            )
 
     # 1. 릴리즈 존재 확인 또는 생성
     release_data = None
