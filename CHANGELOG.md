@@ -4,6 +4,20 @@
 
 ---
 
+## [v2.2.2] - 2026-10-06
+
+### 🐛 버그 수정 및 안정성 향상 (Bug Fixes & Stability)
+- **무한매수 계좌 상세 진입 오류 해결 (`core/account_manager.py`)**:
+  - `compute_account_details()` 내 무한매수 분기에서 `mode` 변수 미정의로 인해 발생하던 `UnboundLocalError` 수정
+  - 무한매수법 v4 공식 규칙(별지점 LOC, 평단 LOC, 쿼터 매도, 지정가 매도) 기반 주문표 산출 및 주문 퉁치기(Netting) 로직 완벽 연동
+- **무한매수 계좌 상세 화면 UI 고도화 (`mobile/views/account_detail.py`)**:
+  - 무한매수법 v4 전용 포지션 현황 카드(보유 수량, 매입 평단가, 현재 평가액, 평가 손익률, 운용 모드) 컴포넌트 추가
+  - 계좌 기본 정보 상단 카드 및 4대 KPI 지표에 무한매수 전용 라벨(운용 상태, 1회 매수 예산 등) 맞춤 지원
+- **전략 레지스트리 유틸리티 추가 (`core/strategy_registry.py`)**:
+  - `is_infinite(name)` 판별 함수 추가로 전략별 UI 분기 일원화
+
+---
+
 ## [v2.2.1] - 2026-10-05
 
 ### 🧩 UI 컴포넌트화 및 코드 중복 제거 (Refactored - Phase 3)

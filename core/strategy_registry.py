@@ -57,6 +57,10 @@ def is_vr(name: Optional[str]) -> bool:
     return classify_strategy(name) == VR
 
 
+def is_infinite(name: Optional[str]) -> bool:
+    return classify_strategy(name) == INFINITE
+
+
 def get_target_yield(name: Optional[str]) -> float:
     """슬롯 목표가(U)가 없을 때 사용하는 기본 목표 수익률."""
     return TARGET_YIELD_JONGJONG if is_jongjong(name) else TARGET_YIELD_DEFAULT

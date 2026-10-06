@@ -13,7 +13,7 @@ from datetime import datetime
 import flet as ft
 
 from core.data import get_stock_price_for_date
-from core.strategy_registry import is_vr
+from core.strategy_registry import is_vr, is_infinite, is_jongjong
 from core.trade_history import build_trade_rows
 from mobile.theme import (
     BG_DARK, SURFACE_CARD, BORDER_COLOR, ACCENT_BLUE,
@@ -64,7 +64,13 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
                                     ft.Text(name, size=16, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
                                     build_badge(ticker, color=ACCENT_BLUE),
                                 ], spacing=6),
-                                ft.Text(f"{strat} • {mode} (2주 리밸런싱)" if is_vr(strat) else f"{strat} • {mode} 모드 (8분할 운용)", size=11, color=VR_PURPLE if is_vr(strat) else TEXT_SECONDARY)
+                                ft.Text(
+                                    f"{strat} • {mode} (2주 리밸런싱)" if is_vr(strat) else (
+                                        f"{strat} • {mode}" if is_infinite(strat) else f"{strat} • {mode} 모드"
+                                    ),
+                                    size=11,
+                                    color=VR_PURPLE if is_vr(strat) else (ACCENT_BLUE if is_infinite(strat) else TEXT_SECONDARY)
+                                )
                             ],
                             spacing=2
                         ),
@@ -91,15 +97,15 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
                     ft.Row(
                         controls=[
                             ft.Column([
-                                ft.Text("2주 사이클" if is_vr(strat) else "위기준비금 (AK)", size=10, color=VR_PURPLE if is_vr(strat) else RESERVE_AMBER),
-                                ft.Text(f"{mode}" if is_vr(strat) else f"${ak_val:,.0f}", size=13 if is_vr(strat) else 14, weight=ft.FontWeight.BOLD, color=VR_PURPLE if is_vr(strat) else RESERVE_AMBER)
+                                ft.Text("2주 사이클" if is_vr(strat) else ("운용 상태" if is_infinite(strat) else "위기준비금 (AK)"), size=10, color=VR_PURPLE if is_vr(strat) else (ACCENT_BLUE if is_infinite(strat) else RESERVE_AMBER)),
+                                ft.Text(f"{mode}" if (is_vr(strat) or is_infinite(strat)) else f"${ak_val:,.0f}", size=12 if (is_vr(strat) or is_infinite(strat)) else 14, weight=ft.FontWeight.BOLD, color=VR_PURPLE if is_vr(strat) else (ACCENT_BLUE if is_infinite(strat) else RESERVE_AMBER))
                             ], spacing=1),
                             ft.Column([
-                                ft.Text("보유 수량" if is_vr(strat) else "실가동시드 (AR)", size=10, color=ACCENT_BLUE),
-                                ft.Text(f"{hold:,}주" if is_vr(strat) else f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                                ft.Text("보유 수량" if (is_vr(strat) or is_infinite(strat)) else "실가동시드 (AR)", size=10, color=ACCENT_BLUE),
+                                ft.Text(f"{hold:,}주" if (is_vr(strat) or is_infinite(strat)) else f"${ar_val:,.0f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                             ], spacing=1),
                             ft.Column([
-                                ft.Text("가용 Pool 예산" if is_vr(strat) else "하루 배분 예산", size=10, color=TEXT_SECONDARY),
+                                ft.Text("가용 Pool 예산" if is_vr(strat) else ("1회 매수 예산" if is_infinite(strat) else "하루 배분 예산"), size=10, color=TEXT_SECONDARY),
                                 ft.Text(f"${budget:,.2f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
                             ], spacing=1),
                             ft.Column([
@@ -224,6 +230,48 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
                     )
                 ],
                 spacing=6
+            )
+        )
+    elif is_infinite(strat):
+        avg_p = dtl.get('avg_price', 0.0)
+        eval_amt = hold * latest_price
+        ret_loss = ((latest_price / avg_p - 1.0) * 100.0) if avg_p > 0 else 0.0
+        loss_color = PROFIT_GREEN if ret_loss >= 0 else LOSS_RED
+        holdings_section = ft.Container(
+            bgcolor=SURFACE_CARD,
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.35, ACCENT_BLUE)),
+            border_radius=12,
+            padding=14,
+            content=ft.Column(
+                controls=[
+                    ft.Row([
+                        ft.Icon(ft.Icons.ALL_INCLUSIVE, color=ACCENT_BLUE, size=18),
+                        ft.Text("무한매수법 v4.0 포지션 현황", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY),
+                    ], spacing=6),
+                    ft.Row([
+                        ft.Column([
+                            ft.Text("보유 수량", size=10, color=TEXT_MUTED),
+                            ft.Text(f"{hold:,}주", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                        ], spacing=1),
+                        ft.Column([
+                            ft.Text("매입 평단가", size=10, color=TEXT_MUTED),
+                            ft.Text(f"${avg_p:.2f}" if avg_p > 0 else "-", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                        ], spacing=1),
+                        ft.Column([
+                            ft.Text("현재 평가액", size=10, color=TEXT_MUTED),
+                            ft.Text(f"${eval_amt:,.2f}", size=14, weight=ft.FontWeight.BOLD, color=TEXT_PRIMARY)
+                        ], spacing=1),
+                        ft.Column([
+                            ft.Text("평가 손익률", size=10, color=TEXT_MUTED),
+                            ft.Text(f"{ret_loss:+.2f}%" if hold > 0 else "-", size=14, weight=ft.FontWeight.BOLD, color=loss_color)
+                        ], spacing=1),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Text(
+                        f"현재 운용 모드: {mode} • 40분할 원칙에 따라 매일 산출되는 LOC 주문을 접수합니다.",
+                        size=11, color=TEXT_SECONDARY
+                    )
+                ],
+                spacing=8
             )
         )
     else:

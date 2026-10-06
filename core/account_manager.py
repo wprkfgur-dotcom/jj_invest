@@ -886,26 +886,103 @@ class AccountManager:
                 'summary_text': f"⚡ [VR 5.0 2주 예약] V: ${v_val:,.2f} | 밴드: ${v_val*(1-band_pct):,.2f} ~ ${v_val*(1+band_pct):,.2f} | 가용 Pool: ${budget:,.2f}"
             }
         else:
+            # 3-C. 무한매수법 v4.0 (Infinite Buying V4.0)
             reserve_ratio = 0.0
             ar_val = initial_seed
             ak_val = 0.0
             strat = InfiniteBuyingV4Strategy(ticker=ticker, initial_capital=initial_seed, divisions=40)
-            budget = max(0.0, final_cash / 40.0)
+
+            t_val = float(last_row.get('T', 0.0)) if (len(last_row) > 0 and 'T' in last_row) else 0.0
+            raw_mode = str(last_row.get('Mode', 'NORMAL')) if (len(last_row) > 0 and 'Mode' in last_row) else 'NORMAL'
+            mode = f"일반 (T={t_val:.1f}/40)" if raw_mode.upper() == 'NORMAL' else f"리버스 (T={t_val:.1f})"
+
+            div_count = 40.0
+            half_div = div_count / 2.0
+            is_soxl = ('SOXL' in ticker.upper())
+            limit_target_pct = 0.20 if is_soxl else 0.15
+
+            if hold_shares == 0 or t_val <= 0.0:
+                budget = final_cash / div_count
+            else:
+                budget = final_cash / max(div_count - t_val, 1.0)
+            budget = max(0.0, budget)
+
+            # 별지점 계산
+            if hold_shares > 0 and avg_price > 0:
+                star_pct = strat.calculate_star_pct(t_val)
+                star_point = round(avg_price * (1.0 + star_pct), 2)
+            else:
+                star_point = latest_close
+
             raw_sell_orders = []
             raw_buy_orders = []
+
+            # 매도 주문 산출
             if hold_shares > 0:
-                raw_sell_orders.append({
-                    'price': latest_close * 1.10,
-                    'qty': hold_shares,
-                    'stage': 'LOC 매도',
-                    'type': 'LOC 매도'
-                })
-            raw_buy_orders.append({
-                'price': latest_close,
-                'qty': max(1, int((final_cash / 40.0) / latest_close)) if latest_close > 0 else 1,
-                'stage': 'LOC 매수',
-                'type': 'LOC 매수'
-            })
+                quarter_qty = int(hold_shares / 4)
+                limit_qty = hold_shares - quarter_qty
+                limit_price = round(avg_price * (1.0 + limit_target_pct), 2) if avg_price > 0 else round(latest_close * (1.0 + limit_target_pct), 2)
+
+                if quarter_qty > 0:
+                    raw_sell_orders.append({
+                        'price': max(0.01, star_point),
+                        'qty': quarter_qty,
+                        'stage': '쿼터 매도 (LOC)',
+                        'type': 'LOC 매도'
+                    })
+                if limit_qty > 0:
+                    raw_sell_orders.append({
+                        'price': max(0.01, limit_price),
+                        'qty': limit_qty,
+                        'stage': f'지정가 매도 (+{int(limit_target_pct*100)}%)',
+                        'type': '지정가 매도'
+                    })
+
+            # 매수 주문 산출
+            if hold_shares == 0 or t_val <= 0.0:
+                init_qty = int(budget / latest_close) if latest_close > 0 else 0
+                if init_qty > 0:
+                    raw_buy_orders.append({
+                        'price': latest_close,
+                        'qty': init_qty,
+                        'stage': '1회분 LOC 매수',
+                        'type': 'LOC 매수'
+                    })
+            elif t_val < half_div:
+                # 전반전: 0.5회분 별지점 LOC + 0.5회분 평단 LOC
+                buy_p_star = max(round(star_point - 0.01, 2), 0.01)
+                buy_p_avg = max(round(avg_price, 2), 0.01) if avg_price > 0 else latest_close
+                budget_half = budget * 0.5
+
+                qty_star = int(budget_half / buy_p_star) if buy_p_star > 0 else 0
+                qty_avg = int(budget_half / buy_p_avg) if buy_p_avg > 0 else 0
+
+                if qty_star > 0:
+                    raw_buy_orders.append({
+                        'price': buy_p_star,
+                        'qty': qty_star,
+                        'stage': '별지점 LOC 매수 (0.5회)',
+                        'type': 'LOC 매수'
+                    })
+                if qty_avg > 0:
+                    raw_buy_orders.append({
+                        'price': buy_p_avg,
+                        'qty': qty_avg,
+                        'stage': '평단 LOC 매수 (0.5회)',
+                        'type': 'LOC 매수'
+                    })
+            else:
+                # 후반전: 1회분 전체 별지점 LOC
+                buy_p_star = max(round(star_point - 0.01, 2), 0.01)
+                qty_star = int(budget / buy_p_star) if buy_p_star > 0 else 0
+                if qty_star > 0:
+                    raw_buy_orders.append({
+                        'price': buy_p_star,
+                        'qty': qty_star,
+                        'stage': '별지점 LOC 매수 (1회)',
+                        'type': 'LOC 매수'
+                    })
+
             net_result = calculate_order_netting(raw_buy_orders, raw_sell_orders)
             sell_orders = net_result['net_sell_orders']
             buy_orders = net_result['net_buy_orders']
