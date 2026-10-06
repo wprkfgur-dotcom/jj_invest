@@ -67,9 +67,12 @@ scratch/test_*.csv
 
 
 
-# flet_apk_project ³» µ¿±âÈ­ º¹»çº» (sync_app.py°¡ ·çÆ® ¼Ò½º·ÎºÎÅÍ »ı¼º)
+# flet_apk_project ë‚´ ë™ê¸°í™” ë³µì‚¬ë³¸ (sync_app.pyê°€ ë£¨íŠ¸ ì†ŒìŠ¤ë¡œë¶€í„° ìƒì„±)
 flet_apk_project/core/
 flet_apk_project/gui/
 flet_apk_project/strategies/
 flet_apk_project/main.py
 flet_apk_project/mobile/
+
+# Kiwoom REST API & Remote Trading Server (Local Only)
+kiwoom_api/
