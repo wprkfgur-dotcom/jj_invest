@@ -243,8 +243,26 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     # -------------------------------------------------------------
     # 3. 금일 매수·매도 주문표 (간결하고 직관적인 수량 중심 UI)
     # -------------------------------------------------------------
-    sell_orders = dtl.get('sell_orders', [])
-    buy_orders = dtl.get('buy_orders', [])
+    sell_orders = list(dtl.get('sell_orders', []))
+    buy_orders = list(dtl.get('buy_orders', []))
+
+    def _extract_order_price(o):
+        p = o.get('price')
+        if p is not None:
+            try:
+                return float(p)
+            except (ValueError, TypeError):
+                pass
+        raw = str(o.get('주문단가', '')).replace('$', '').replace(',', '').strip()
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return 0.0
+
+    # VR 전략의 밴드 예약 순서를 제외하고는 매도/매수 주문을 가격별 내림차순(높은 가격 -> 낮은 가격)으로 일관 정렬
+    if not is_vr(strat):
+        sell_orders = sorted(sell_orders, key=_extract_order_price, reverse=True)
+        buy_orders = sorted(buy_orders, key=_extract_order_price, reverse=True)
 
     total_sell_qty = 0
     for s in sell_orders:

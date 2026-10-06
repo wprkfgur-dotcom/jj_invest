@@ -33,7 +33,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from core.account_manager import AccountManager
-from core.order_netting import calculate_order_netting
+from core.order_netting import calculate_order_netting, generate_jongjong_orders
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from strategies.vr_v5 import ValueRebalancingV5Strategy
@@ -100,6 +100,27 @@ class TestJongJongTrader(unittest.TestCase):
         self.assertIn('net_buy_orders', netting_result)
         self.assertIn('net_sell_orders', netting_result)
         self.assertTrue(netting_result.get('is_netted', False))
+
+        # 종종이 주문표 매도 주문 가격 내림차순 정렬 검증 (최저 목표가가 맨 아래 위치)
+        unsold_lots = [
+            {'date': '10.01', 'R': 300, 'U': 168.22, 'hold_days': 1},
+            {'date': '10.02', 'R': 282, 'U': 168.79, 'hold_days': 2},
+        ]
+        orders_result = generate_jongjong_orders(
+            unsold_lots=unsold_lots,
+            yest_close=164.27,
+            p_budget=47435.0,
+            mode='Normal',
+            C2=0.128,
+            C3=-0.17
+        )
+        sells = orders_result['net_sell_orders']
+        self.assertGreaterEqual(len(sells), 2)
+        sell_prices = [s['price'] for s in sells]
+        # 가격 내림차순 검증
+        self.assertEqual(sell_prices, sorted(sell_prices, reverse=True))
+        # 168.22가 맨 아래(마지막)에 위치하는지 검증
+        self.assertEqual(sells[-1]['price'], 168.22)
 
     def test_tc3_infinite_buying_v4_strategy(self):
         """TC-3: 라오어 무한매수법 v4 전략 엔진 초기화 및 검증"""

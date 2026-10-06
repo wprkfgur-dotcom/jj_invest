@@ -43,7 +43,8 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
     if not clean_buys or not clean_sells:
         formatted_sells = []
         accum_s = 0
-        for idx, s in enumerate(clean_sells):
+        sorted_sells = sorted(clean_sells, key=lambda x: x['price'], reverse=True)
+        for idx, s in enumerate(sorted_sells):
             accum_s += s['qty']
             formatted_sells.append({
                 '구분': s['stage'],
@@ -60,7 +61,8 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
 
         formatted_buys = []
         accum_b = 0
-        for idx, b in enumerate(clean_buys):
+        sorted_buys = sorted(clean_buys, key=lambda x: x['price'], reverse=True)
+        for idx, b in enumerate(sorted_buys):
             accum_b += b['qty']
             formatted_buys.append({
                 '호가단계': b['stage'],
@@ -95,7 +97,8 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
         # 가격 구간이 겹치지 않음
         formatted_sells = []
         accum_s = 0
-        for idx, s in enumerate(clean_sells):
+        sorted_sells = sorted(clean_sells, key=lambda x: x['price'], reverse=True)
+        for idx, s in enumerate(sorted_sells):
             accum_s += s['qty']
             formatted_sells.append({
                 '구분': s['stage'],
@@ -112,7 +115,8 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
 
         formatted_buys = []
         accum_b = 0
-        for idx, b in enumerate(clean_buys):
+        sorted_buys = sorted(clean_buys, key=lambda x: x['price'], reverse=True)
+        for idx, b in enumerate(sorted_buys):
             accum_b += b['qty']
             formatted_buys.append({
                 '호가단계': b['stage'],
@@ -190,6 +194,9 @@ def calculate_order_netting(raw_buy_orders: List[Dict[str, Any]],
             order_q = ns - prev_net_sell
             raw_net_sells.append({'price': p, 'qty': order_q})
             prev_net_sell = ns
+
+    # 매도는 가격별 내림차순 정렬 (높은 가격 -> 낮은 가격)
+    raw_net_sells.sort(key=lambda x: x['price'], reverse=True)
 
     # 2. 순 매수 주문 도출: NetBuy(p) = gross_buy(p) - gross_sell(p)
     raw_net_buys = []
@@ -413,6 +420,13 @@ def generate_jongjong_orders(
                 'price': l['U'],
                 'qty': q
             })
+
+    # 매도 주문 가격별 내림차순 정렬 (높은 가격 -> 낮은 가격 순서, 최저 목표가가 맨 아래로 위치)
+    formatted_sells.sort(key=lambda x: float(x.get('price', 0.0)), reverse=True)
+    accum_s = 0
+    for s in formatted_sells:
+        accum_s += int(s.get('qty', 0))
+        s['누적수량'] = f"{accum_s:,}주"
 
     # 2. 매수 주문 생성
     formatted_buys = []
