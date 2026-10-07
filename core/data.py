@@ -136,6 +136,31 @@ def get_db_date_range(ticker: str) -> tuple:
         conn.close()
 
 
+def get_exact_price_from_db(ticker: str, target_date: str):
+    """로컬 DB에서 특정 날짜(date == target_date)의 종가를 정확히 반환합니다. (없으면 None)"""
+    ticker = ticker.upper().strip()
+    target_clean = str(target_date).strip()[:10]
+    db_path = get_db_path()
+    if not os.path.exists(db_path):
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        init_market_db(conn)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT close FROM daily_candles
+            WHERE ticker = ? AND date = ?
+        """, (ticker, target_clean))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return round(float(row[0]), 2)
+        return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 def get_price_from_db(ticker: str, target_date: str) -> float:
     """로컬 DB에서 특정 날짜(또는 해당 날짜 직전)의 종가를 즉시 반환합니다. (없으면 0.0)"""
     ticker = ticker.upper().strip()
@@ -160,6 +185,7 @@ def get_price_from_db(ticker: str, target_date: str) -> float:
         return 0.0
     finally:
         conn.close()
+
 
 
 def fetch_market_data(ticker: str, start_date: str, end_date: str, warmup_days: int = 50) -> pd.DataFrame:
@@ -316,4 +342,41 @@ def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: floa
         print(f"[{ticker}] {target_clean} 과거 종가 조회 안내: {ex}")
 
     return get_current_stock_price(ticker, fallback_price)
+
+
+def get_exact_stock_price_for_date(ticker: str, target_date: str):
+    """
+    지정한 종목의 특정 정산 대상 날짜(target_date) '당일 마감 종가'를 정확히 조회합니다.
+    - 해당 날짜(date == target_date)의 종가만 반환하며, 이전 날짜로 대체하지 않습니다.
+    - 1) 로컬 SQLite DB에서 정확한 날짜(date == ?)로 우선 조회.
+    - 2) DB에 없으면 야후 파이낸스 증분 다운로드 후 해당 날짜 일치 여부 확인.
+    - 3) 당일 마감 종가를 확인할 수 없는 경우(미국 장 마감 전, 휴장일, 주말 등) None을 반환합니다.
+    """
+    if not target_date:
+        return None
+
+    target_clean = str(target_date).strip()[:10]
+    if len(target_clean) != 10:
+        return None
+
+    # 1. 로컬 DB에서 정확한 날짜 종가 조회 (초고속 0.001s)
+    db_p = get_exact_price_from_db(ticker, target_clean)
+    if db_p is not None and db_p > 0:
+        return db_p
+
+    # 2. DB에 없으면 최신 캔들 동기화 시도
+    try:
+        dt = datetime.strptime(target_clean, '%Y-%m-%d')
+        s_date = (dt - timedelta(days=7)).strftime('%Y-%m-%d')
+        e_date = (dt + timedelta(days=2)).strftime('%Y-%m-%d')
+        fetch_market_data(ticker, s_date, e_date, warmup_days=5)
+
+        # 동기화 후 다시 정확한 날짜 종가 확인
+        db_p = get_exact_price_from_db(ticker, target_clean)
+        if db_p is not None and db_p > 0:
+            return db_p
+    except Exception as ex:
+        print(f"[{ticker}] {target_clean} 종가 동기화 안내: {ex}")
+
+    return None
 

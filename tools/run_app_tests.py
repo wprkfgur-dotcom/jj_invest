@@ -37,7 +37,7 @@ from core.order_netting import calculate_order_netting, generate_jongjong_orders
 from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from strategies.vr_v5 import ValueRebalancingV5Strategy
-from core.data import get_current_stock_price, get_price_from_db
+from core.data import get_current_stock_price, get_price_from_db, get_exact_stock_price_for_date
 from core.app_update import APP_VERSION, check_remote_version_info, parse_download_url
 from mobile.theme import BG_DARK, PROFIT_GREEN, LOSS_RED
 from mobile.helpers import compute_suggested_trades, parse_picked_date_str
@@ -138,6 +138,15 @@ class TestJongJongTrader(unittest.TestCase):
         # 실시간 fallback 가격 로직 검증
         price = get_current_stock_price("INVALID_TICKER_XYZ", fallback_price=50.0)
         self.assertEqual(price, 50.0)
+
+        # 정확한 날짜 종가 조회 (get_exact_stock_price_for_date) 검증
+        # 2024-01-05 (금요일 정상 영업일) -> 종가 확인 가능
+        exact_p = get_exact_stock_price_for_date("SOXL", "2024-01-05")
+        if exact_p is not None:
+            self.assertGreater(exact_p, 0.0)
+        # 2024-01-06 (토요일 주말/휴장일) -> 미확인(None) 반환 검증
+        exact_weekend = get_exact_stock_price_for_date("SOXL", "2024-01-06")
+        self.assertIsNone(exact_weekend)
 
     def test_tc5_app_update_version_check(self):
         """TC-5: GitHub Releases 자동 업데이트 버전 파싱 및 API 검증"""

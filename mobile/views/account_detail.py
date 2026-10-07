@@ -12,7 +12,7 @@
 from datetime import datetime
 import flet as ft
 
-from core.data import get_stock_price_for_date
+from core.data import get_stock_price_for_date, get_exact_stock_price_for_date
 from core.strategy_registry import is_vr, is_infinite, is_jongjong
 from core.trade_history import build_trade_rows
 from mobile.theme import (
@@ -494,16 +494,18 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     strat_name = acc.get('strategy', '')
     net_info = dtl.get('netting_info', {})
 
-    init_close = get_stock_price_for_date(ticker, default_settle_date, fallback_price=fallback_p)
-    calc_buy_q, calc_sell_q = compute_suggested_trades(
-        init_close, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
-    )
-
-    if calc_buy_q == 0 and not records and buy_orders:
-        try:
-            calc_buy_q = int(str(buy_orders[0].get('주문수량', '0')).replace('주', '').replace(',', '').strip())
-        except Exception:
-            pass
+    exact_close = get_exact_stock_price_for_date(ticker, default_settle_date)
+    if exact_close is not None and exact_close > 0:
+        calc_buy_q, calc_sell_q = compute_suggested_trades(
+            exact_close, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
+        )
+        initial_close_str = f"{exact_close:.2f}"
+        initial_buy_str = str(calc_buy_q)
+        initial_sell_str = str(calc_sell_q)
+    else:
+        initial_close_str = ""
+        initial_buy_str = "0"
+        initial_sell_str = "0"
 
     settle_date_field = ft.TextField(
         label="정산 일자 (YYYY-MM-DD)",
@@ -520,7 +522,8 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     close_field = ft.TextField(
         label="종가($)",
         label_style=ft.TextStyle(size=11, color=TEXT_SECONDARY),
-        value=f"{init_close:.2f}",
+        value=initial_close_str,
+        hint_text="종가 직접 입력",
         keyboard_type=ft.KeyboardType.NUMBER,
         border_color=BORDER_COLOR,
         focused_border_color=ACCENT_BLUE,
@@ -535,7 +538,7 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     buy_qty_field = ft.TextField(
         label="매수(주)",
         label_style=ft.TextStyle(size=11, color=PROFIT_GREEN),
-        value=str(calc_buy_q),
+        value=initial_buy_str,
         keyboard_type=ft.KeyboardType.NUMBER,
         border_color=BORDER_COLOR,
         focused_border_color=PROFIT_GREEN,
@@ -550,7 +553,7 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     sell_qty_field = ft.TextField(
         label="매도(자동)",
         label_style=ft.TextStyle(size=11, color=LOSS_RED),
-        value=str(calc_sell_q),
+        value=initial_sell_str,
         keyboard_type=ft.KeyboardType.NUMBER,
         border_color=BORDER_COLOR,
         focused_border_color=LOSS_RED,
@@ -568,13 +571,19 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
             return
         d_clean = str(new_date_str).strip()[:10]
         if len(d_clean) == 10:
-            p = get_stock_price_for_date(ticker, d_clean, fallback_price=fallback_p)
-            close_field.value = f"{p:.2f}"
-            b_q, s_q = compute_suggested_trades(
-                p, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
-            )
-            buy_qty_field.value = str(b_q)
-            sell_qty_field.value = str(s_q)
+            p = get_exact_stock_price_for_date(ticker, d_clean)
+            if p is not None and p > 0:
+                close_field.value = f"{p:.2f}"
+                b_q, s_q = compute_suggested_trades(
+                    p, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
+                )
+                buy_qty_field.value = str(b_q)
+                sell_qty_field.value = str(s_q)
+            else:
+                # 해당 날짜의 마감 종가를 확인할 수 없는 경우 비움
+                close_field.value = ""
+                buy_qty_field.value = "0"
+                sell_qty_field.value = "0"
             try:
                 close_field.update()
                 buy_qty_field.update()
@@ -585,8 +594,18 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     settle_date_field.on_change = lambda e: on_settle_date_picked(settle_date_field.value)
 
     def on_close_changed(e):
+        val_str = close_field.value.strip() if close_field.value else ""
+        if not val_str:
+            buy_qty_field.value = "0"
+            sell_qty_field.value = "0"
+            try:
+                buy_qty_field.update()
+                sell_qty_field.update()
+            except Exception:
+                pass
+            return
         try:
-            val = float(close_field.value.strip())
+            val = float(val_str)
             b_q, s_q = compute_suggested_trades(
                 val, buy_orders, sell_orders, unsold_lots=unsold_lots_data, strategy_name=strat_name, netting_info=net_info
             )
@@ -600,11 +619,15 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
     close_field.on_change = on_close_changed
 
     def handle_settle(e):
+        s_date = settle_date_field.value.strip() if settle_date_field.value else ""
+        c_p_str = close_field.value.strip() if close_field.value else ""
+        if not c_p_str:
+            show_toast(app.page, f"{s_date}의 마감 종가를 확인할 수 없습니다. 종가를 직접 입력해주세요.", is_error=True)
+            return
         try:
-            s_date = settle_date_field.value.strip()
-            c_p = float(close_field.value.strip())
-            b_q = int(buy_qty_field.value.strip())
-            s_q = int(sell_qty_field.value.strip())
+            c_p = float(c_p_str)
+            b_q = int(buy_qty_field.value.strip() or "0")
+            s_q = int(sell_qty_field.value.strip() or "0")
             app.am.record_daily_close(acc_id=acc_id, close_price=c_p, buy_qty=b_q, sell_qty=s_q, buy_price=c_p, trade_date=s_date, mode=dtl.get('mode', 'Normal'))
             show_toast(app.page, f"{s_date} 정산 데이터가 저장되었습니다! 다음 날짜 주문표로 넘어가려면 [다음 거래일 진행]을 누르세요.")
             app.reload_data()
