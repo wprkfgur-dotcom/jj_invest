@@ -139,13 +139,17 @@ def build_strategies_view() -> ft.Control:
                     ),
                     ft.Container(height=4),
 
-                    make_section_title(ft.Icons.ACCOUNT_BALANCE_WALLET, "위기준비금(AK, 5%) & 10거래일 복리 주기", PROFIT_GREEN),
+                    make_section_title(ft.Icons.ACCOUNT_BALANCE_WALLET, "위기준비금(AK, 5%) & Risk-Off 병합 시스템", PROFIT_GREEN),
                     make_bullet_point(
-                        "위기준비금(AK, 5%) 영구 격리",
-                        "전체 자본의 5%는 비상금으로 분리하여 평상시 매수에 투입하지 않고 계좌 최후의 안전판으로 보존합니다."
+                        "위기준비금(AK, 5%) 평상시 엄격 격리 보관",
+                        "전체 자본의 5%는 비상금으로 완전히 분리하여 평상시(Normal/Safe) 매수에는 절대 투입하지 않고 안전 금고에 보존합니다."
                     ),
                     make_bullet_point(
-                        "10거래일 복리 정산 및 재투자",
+                        "Risk-Off 진입 시 위기준비금 전액 병합",
+                        "시장 급락으로 Risk-Off 모드가 시작되는 당일, 그동안 쌓인 모든 위기준비금을 실가동 시드(AR)와 가용 현금에 100% 병합하여 저점 분할매수 실탄으로 전진 배치합니다."
+                    ),
+                    make_bullet_point(
+                        "10거래일 복리 정산 및 재적립",
                         "매 10거래일마다 누적 실현손익을 정산하여 5%는 위기준비금으로 적립하고, 95%는 실가동 시드(AR)에 합산하여 원금을 키우는 복리 시스템이 자동 가동됩니다."
                     ),
                 ],

@@ -1,38 +1,26 @@
-"""
-종종이(JJ) 분할매매 전략 모듈
-3단계 시장 모드(Normal/Safe/Riskoff), 비선형 LOC 분할 주문, 로트별 익절 및 10일 시간손절, 위기준비금(AK) 복리 관리.
-"""
-import math
-import numpy as np
+import sys
+import os
+import io
+
+sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8')
+sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
+
 import pandas as pd
-from .base import BaseStrategy
+import numpy as np
+from core.data import fetch_market_data
+from strategies.jongjong import JongJongStrategy, excel_round, round_down, round_up, safe_round4
+from core.metrics import calculate_metrics, build_comparison_table, calculate_yearly_stats
 
 
-# 1. 엑셀 수식 정합성용 수학 유틸리티 함수
-def excel_round(val, digits=0):
-    if val is None or math.isnan(val) or math.isinf(val):
-        return None
-    factor = 10 ** digits
-    res = math.copysign(math.floor(abs(val) * factor + 0.5), val)
-    return res / factor if digits > 0 else int(res)
-
-def round_down(val, digits=2):
-    factor = 10 ** digits
-    return math.floor(val * factor + 1e-12) / factor
-
-def round_up(val, digits=2):
-    factor = 10 ** digits
-    return math.ceil(val * factor - 1e-9) / factor
-
-def safe_round4(val):
-    return round(val * 10000.0) / 10000.0
-
-
-class JongJongStrategy(BaseStrategy):
+class JongJongReserveMergedStrategy(JongJongStrategy):
     """
-    종종이(JJ) 3단계 시장 모드 & LOC 5분할 매매 전략
+    위기준비금(AK) 격리 보관 후 Risk-Off 모드 진입 시 전액 투자금(AR & Cash)에 병합하는 전략
+    
+    variant:
+      - 'standard': Risk-Off 진입 시 AK 전액 병합(AK=0). 이후 복리 주기에서 수익 시 AK 재적립(기존 복리 수식).
+      - 'no_deduct_on_loss': 손실 시 AK를 깎지 않고(수익 시에만 적립) Risk-Off 때만 병합.
+      - 'pause_reinvest_in_riskoff': Risk-Off 진행 중에는 AK 적립을 중단(100% AR 복리), Normal/Safe 복귀 후 재적립.
     """
-
     def __init__(self,
                  initial_capital: float = 200000.0,
                  reserve_ratio: float = 0.05,
@@ -49,80 +37,27 @@ class JongJongStrategy(BaseStrategy):
                  risk_dd_threshold: float = -0.08,
                  risk_drop_threshold: float = -0.15,
                  risk_buy_offset: float = -0.055,
-                 reserve_merge_on_riskoff: bool = True,
-                 name: str = "종종이(JJ)"):
-        super().__init__(name=name, initial_capital=initial_capital,
-                         fee_rate=fee_rate, sec_fee=sec_fee)
-
-        self.reserve_ratio = float(reserve_ratio)
-        self.reserve_merge_on_riskoff = bool(reserve_merge_on_riskoff)
-        self.max_hold_days = int(max_hold_days)
-        self.reinvest_cycle = int(reinvest_cycle)
-        self.order_split_count = int(order_split_count)
-        self.order_curvature = float(order_curvature)
-        self.range_normal = float(range_normal)
-        self.range_crash = float(range_crash)
-
-        self.div_rounds = div_rounds if div_rounds is not None else {
-            'Normal': 8.0, 'Safe': 7.0, 'Riskoff': 5.0
-        }
-        self.target_yields = target_yields if target_yields is not None else {
-            'Normal': 0.0275, 'Safe': 0.0025, 'Riskoff': 0.0070
-        }
-
-        self.risk_dd_threshold = float(risk_dd_threshold)
-        self.risk_drop_threshold = float(risk_drop_threshold)
-        self.risk_buy_offset = float(risk_buy_offset)
-
-    def prepare_indicators(self, df_data: pd.DataFrame, start_date: str) -> pd.DataFrame:
-        """
-        MA5, MA20 및 기본 시장 모드(DB_Mode)를 계산합니다.
-        """
-        df = df_data.copy().reset_index(drop=True)
-        trade_start_indices = df[df['Date'] >= pd.Timestamp(start_date)].index
-        first_trade_idx = trade_start_indices[0] if len(trade_start_indices) > 0 else (len(df) - 1)
-        db_start_idx = max(0, first_trade_idx - 25)
-        df = df.iloc[db_start_idx:].reset_index(drop=True)
-
-        closes = df['Close'].values
-        n = len(df)
-        ma5, ma20, g_col, h_col, i_col, j_col, db_mode = [], [], [], [], [], [], []
-
-        for k in range(n):
-            m5 = closes[k] if k < 4 else np.mean(closes[k-4:k+1])
-            m20 = closes[k] if k < 19 else np.mean(closes[k-19:k+1])
-            g = bool(m5 >= m20)
-            h = bool(closes[k] >= m20)
-            i_chg = 0.0 if k == 0 else (closes[k] / closes[k-1] - 1.0)
-            j_chg = i_chg if k < 2 else (closes[k] / closes[k-2] - 1.0)
-
-            ma5.append(m5)
-            ma20.append(m20)
-            g_col.append(g)
-            h_col.append(h)
-            i_col.append(i_chg)
-            j_col.append(j_chg)
-
-            if k < 3:
-                db_mode.append('Normal')
-            else:
-                cond_safe = ((not h_col[k-3]) and h_col[k-2] and (i_col[k-1] <= -0.03)) or (g_col[k-2] and (i_col[k-1] <= -0.08))
-                cond_norm = ((not g_col[k-2]) and (i_col[k-1] >= 0.058)) or ((not g_col[k-2]) and (j_col[k-1] >= 0.06))
-                if cond_safe:
-                    db_mode.append('Safe')
-                elif cond_norm:
-                    db_mode.append('Normal')
-                else:
-                    db_mode.append(db_mode[k-1])
-
-        df['MA5'] = ma5
-        df['MA20'] = ma20
-        df['G'] = g_col
-        df['H'] = h_col
-        df['I'] = i_col
-        df['J'] = j_col
-        df['DB_Mode'] = db_mode
-        return df
+                 variant: str = 'standard',
+                 name: str = "종종이(Risk-Off 병합)"):
+        super().__init__(
+            initial_capital=initial_capital,
+            reserve_ratio=reserve_ratio,
+            fee_rate=fee_rate,
+            sec_fee=sec_fee,
+            max_hold_days=max_hold_days,
+            reinvest_cycle=reinvest_cycle,
+            order_split_count=order_split_count,
+            order_curvature=order_curvature,
+            range_normal=range_normal,
+            range_crash=range_crash,
+            div_rounds=div_rounds,
+            target_yields=target_yields,
+            risk_dd_threshold=risk_dd_threshold,
+            risk_drop_threshold=risk_drop_threshold,
+            risk_buy_offset=risk_buy_offset,
+            name=name
+        )
+        self.variant = variant
 
     def run(self, df_data: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
         df = self.prepare_indicators(df_data, start_date)
@@ -147,8 +82,9 @@ class JongJongStrategy(BaseStrategy):
         T3 = self.sec_fee
 
         records = []
+
         ak_vault = M2 * M4
-        trading_cash = (M2 - ak_vault) if self.reserve_merge_on_riskoff else M2
+        trading_cash = M2 - ak_vault
         ar_val = M2 - ak_vault
 
         for t in range(end_idx - start_idx + 1):
@@ -178,34 +114,34 @@ class JongJongStrategy(BaseStrategy):
             elif (t >= (self.reinvest_cycle * 2) and self.reinvest_cycle > 0 and t % self.reinvest_cycle == 0):
                 pf = sum(records[k]['Profit'] for k in range(t - (self.reinvest_cycle * 2), t - self.reinvest_cycle))
                 
-                # (이전 위기준비금 + 10일 손익 > 0) 일 때만 5% 적립/손실분담 작동
-                deduct_reserve = M4 if (prev_ak + pf > 0) else 0.0
-                ak_diff = pf * deduct_reserve
-                ar_diff = pf * (1.0 - deduct_reserve)
-                
+                if self.variant == 'pause_reinvest_in_riskoff' and mode == 'Riskoff':
+                    # Risk-off 기간에는 AK 적립 중단, 100% AR 복리
+                    ak_diff = 0.0
+                    ar_diff = pf
+                elif self.variant == 'no_deduct_on_loss' and pf < 0:
+                    # 손실 시에는 AK 보전 (0% 손실 분담)
+                    ak_diff = 0.0
+                    ar_diff = pf
+                else:
+                    deduct_reserve = M4 if (prev_ak + pf > 0) else 0.0
+                    ak_diff = pf * deduct_reserve
+                    ar_diff = pf * (1.0 - deduct_reserve)
+
                 ak_val = prev_ak + ak_diff
                 ar_val = prev_ar + ar_diff
-                if self.reserve_merge_on_riskoff:
-                    # 매매 실현 손익 pf는 이미 Cash에 포함되어 있으므로, 
-                    # AK로 적립되는 ak_diff 만큼 Cash에서 빼서 AK 금고로 격리 이체
-                    curr_cash_before_trade = prev_cash - ak_diff
-                else:
-                    curr_cash_before_trade = prev_cash
+                curr_cash_before_trade = prev_cash - ak_diff
             else:
                 ak_val = prev_ak
                 ar_val = prev_ar
                 curr_cash_before_trade = prev_cash
 
-            # [Step B-2] Risk-Off 모드 시작 시 위기준비금(AK) 전액 투자금(AR & Cash)에 병합
-            if self.reserve_merge_on_riskoff:
-                riskoff_started = (mode == 'Riskoff' and prev_mode != 'Riskoff')
-                if riskoff_started and ak_val > 0:
-                    merged_ak = ak_val
-                    ar_val += merged_ak
-                    curr_cash_before_trade += merged_ak
-                    ak_val = 0.0
-                else:
-                    merged_ak = 0.0
+            # [Step B-2: 핵심 신규 로직] Risk-Off 모드가 '시작'되는 시점 트리거
+            riskoff_started = (mode == 'Riskoff' and prev_mode != 'Riskoff')
+            if riskoff_started and ak_val > 0:
+                merged_ak = ak_val
+                ar_val += merged_ak
+                curr_cash_before_trade += merged_ak
+                ak_val = 0.0
             else:
                 merged_ak = 0.0
 
@@ -377,7 +313,8 @@ class JongJongStrategy(BaseStrategy):
 
             curr_cash = curr_cash_before_trade - s_amt + sell_proceeds
             curr_hold = prev_hold + r_buy - shares_sold_today
-            curr_asset = curr_cash + close_p * curr_hold + (ak_val if self.reserve_merge_on_riskoff else 0.0)
+            
+            curr_asset = curr_cash + close_p * curr_hold + ak_val
 
             max_asset_so_far = max([M2] + [rec['Asset'] for rec in records] + [curr_asset])
             dd = curr_asset / max_asset_so_far - 1.0
@@ -402,3 +339,39 @@ class JongJongStrategy(BaseStrategy):
         df_res = pd.DataFrame(records)
         df_res['DD'] = self.compute_drawdown(df_res['Asset'], self.initial_capital)
         return df_res
+
+
+def run_comprehensive():
+    start_date = "2011-03-01"
+    end_date = "2026-09-30"
+    capital = 100000.0
+
+    for ticker in ["SOXL", "TQQQ"]:
+        print("\n" + "#"*80)
+        print(f" ### [{ticker}] {start_date} ~ {end_date} 백테스트 비교 분석 ###")
+        print("#"*80)
+        df_market = fetch_market_data(ticker, start_date, end_date, warmup_days=60)
+
+        strat_orig = JongJongStrategy(initial_capital=capital, name="1. 종종이 (기존)")
+        strat_v1 = JongJongReserveMergedStrategy(initial_capital=capital, variant='standard', name="2. 종종이 (Risk-Off 전액병합)")
+        strat_v2 = JongJongReserveMergedStrategy(initial_capital=capital, variant='no_deduct_on_loss', name="3. 종종이 (병합+손실시AK보전)")
+        strat_v3 = JongJongReserveMergedStrategy(initial_capital=capital, variant='pause_reinvest_in_riskoff', name="4. 종종이 (병합+RiskOff중적립일시정지)")
+
+        df_orig = strat_orig.run(df_market, start_date, end_date)
+        df_v1 = strat_v1.run(df_market, start_date, end_date)
+        df_v2 = strat_v2.run(df_market, start_date, end_date)
+        df_v3 = strat_v3.run(df_market, start_date, end_date)
+
+        results_dict = {
+            strat_orig.name: (df_orig, capital),
+            strat_v1.name: (df_v1, capital),
+            strat_v2.name: (df_v2, capital),
+            strat_v3.name: (df_v3, capital),
+        }
+
+        comp_df = build_comparison_table(results_dict)
+        print(comp_df.to_string(index=False))
+
+
+if __name__ == "__main__":
+    run_comprehensive()

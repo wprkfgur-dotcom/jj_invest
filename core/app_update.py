@@ -9,11 +9,11 @@ import email.utils
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Tuple
 
-APP_VERSION = "2.2.2"
-APP_BUILD_NAME = "JongJong Trader v2.2.2 (Infinite Buying Detail Fix & Stability)"
+APP_VERSION = "2.3.0"
+APP_BUILD_NAME = "JongJong Trader v2.3.0 (Risk-Off Reserve Merging Strategy)"
 # 현재 앱 빌드 기준 타임스탬프 (UTC) 및 한국시간 표시 문자열
-APP_BUILD_TIMESTAMP = 1791291011
-APP_BUILD_DATE_STR = "2026-10-06 21:50"
+APP_BUILD_TIMESTAMP = 1791361782
+APP_BUILD_DATE_STR = "2026-10-07 17:30"
 
 DEFAULT_GITHUB_REPO = "wprkfgur-dotcom/jj_invest"
 DEFAULT_UPDATE_CHANNEL_URL = f"https://github.com/{DEFAULT_GITHUB_REPO}"

@@ -832,8 +832,12 @@ class AccountManager:
             target_yield = strat.target_yields.get(mode, 0.0275)
             div = strat.div_rounds.get(mode, 8.0)
             reserve_ratio = float(acc.get('reserve_ratio', 0.05))
-            ar_val = round(initial_seed * (1.0 - reserve_ratio), 2)
-            ak_val = round(initial_seed * reserve_ratio, 2)
+            if len(last_row) > 0 and 'AR' in last_row and 'AK' in last_row:
+                ar_val = round(float(last_row['AR']), 2)
+                ak_val = round(float(last_row['AK']), 2)
+            else:
+                ar_val = round(initial_seed * (1.0 - reserve_ratio), 2)
+                ak_val = round(initial_seed * reserve_ratio, 2)
             budget = min(ar_val / div, final_cash) if final_cash >= (ar_val / div) else final_cash
             budget = max(0.0, budget)
 
