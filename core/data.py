@@ -11,6 +11,7 @@ import yfinance as yf
 
 # 메모리 캐시 (세션 내 재사용)
 _DATA_CACHE = {}
+_FAILED_EXACT_DATES = set()
 
 
 def get_db_path() -> str:
@@ -344,13 +345,44 @@ def get_stock_price_for_date(ticker: str, target_date: str, fallback_price: floa
     return get_current_stock_price(ticker, fallback_price)
 
 
+def is_us_market_closed_for_date(target_date_str: str) -> bool:
+    """
+    지정한 거래일(target_date_str)의 미국 정규장이 이미 마감되어 공식 종가가 확정되었는지 여부를 확인합니다.
+    - 미국 동부시간(ET) 기준 정규장 마감은 16:00입니다.
+    - 한국 시간(KST, UTC+9) 기준으로는 익일 오전 05:00(서머타임 시) 또는 06:00(평시)입니다.
+    - 따라서 한국 시간 기준으로 target_date 당일이거나 미래 날짜인 경우, 미국 정규장은 아직 시작하지 않았거나 진행 중이므로 종가가 존재할 수 없습니다.
+    - 주말(토/일)인 경우에도 정규장이 열리지 않으므로 종가가 없습니다.
+    """
+    try:
+        dt = datetime.strptime(str(target_date_str).strip()[:10], '%Y-%m-%d')
+        # 주말인 경우 (토: 5, 일: 6) 종가 없음
+        if dt.weekday() in (5, 6):
+            return False
+
+        now_kst = datetime.now()
+        # 오늘 날짜이거나 미래 날짜인 경우:
+        # 미국장은 한국 시간 기준 익일 아침 06:00에 마감되므로, 오늘 당일 낮/저녁 시간에는 오늘 종가가 결코 나올 수 없음!
+        if dt.date() >= now_kst.date():
+            return False
+
+        # 어제 날짜인 경우: 오늘 아침 06:00 이전이면 아직 장이 마감되지 않았거나 반영 전일 수 있음
+        if dt.date() == (now_kst - timedelta(days=1)).date():
+            if now_kst.hour < 6:
+                return False
+
+        return True
+    except Exception:
+        return False
+
+
 def get_exact_stock_price_for_date(ticker: str, target_date: str):
     """
     지정한 종목의 특정 정산 대상 날짜(target_date) '당일 마감 종가'를 정확히 조회합니다.
     - 해당 날짜(date == target_date)의 종가만 반환하며, 이전 날짜로 대체하지 않습니다.
-    - 1) 로컬 SQLite DB에서 정확한 날짜(date == ?)로 우선 조회.
-    - 2) DB에 없으면 야후 파이낸스 증분 다운로드 후 해당 날짜 일치 여부 확인.
-    - 3) 당일 마감 종가를 확인할 수 없는 경우(미국 장 마감 전, 휴장일, 주말 등) None을 반환합니다.
+    - 1) 로컬 SQLite DB에서 정확한 날짜(date == target_date)로 초고속 우선 조회 (0.001s).
+    - 2) 미국 정규장이 아직 마감되지 않은 날짜(당일, 미래, 주말 등)이거나 이미 실패한 날짜인 경우
+         야후 파이낸스 네트워크 대기를 완전히 스킵하고 즉시 None 반환 (화면 멈춤 원천 차단).
+    - 3) 이미 마감된 과거 거래일인데 DB에 누락된 경우에만 1회 백그라운드 동기화 시도.
     """
     if not target_date:
         return None
@@ -359,24 +391,30 @@ def get_exact_stock_price_for_date(ticker: str, target_date: str):
     if len(target_clean) != 10:
         return None
 
+    cache_key = (ticker.upper(), target_clean)
+
     # 1. 로컬 DB에서 정확한 날짜 종가 조회 (초고속 0.001s)
     db_p = get_exact_price_from_db(ticker, target_clean)
     if db_p is not None and db_p > 0:
         return db_p
 
-    # 2. DB에 없으면 최신 캔들 동기화 시도
+    # 2. 미국 정규장이 아직 마감되지 않은 날짜(오늘, 미래, 주말)이거나 이미 확인 실패한 경우 즉시 스킵 (0.0001s)
+    if cache_key in _FAILED_EXACT_DATES or not is_us_market_closed_for_date(target_clean):
+        return None
+
+    # 3. 마감된 과거 거래일인데 DB에만 없는 경우 동기화 시도 (단 1회)
     try:
         dt = datetime.strptime(target_clean, '%Y-%m-%d')
         s_date = (dt - timedelta(days=7)).strftime('%Y-%m-%d')
         e_date = (dt + timedelta(days=2)).strftime('%Y-%m-%d')
         fetch_market_data(ticker, s_date, e_date, warmup_days=5)
 
-        # 동기화 후 다시 정확한 날짜 종가 확인
         db_p = get_exact_price_from_db(ticker, target_clean)
         if db_p is not None and db_p > 0:
             return db_p
     except Exception as ex:
         print(f"[{ticker}] {target_clean} 종가 동기화 안내: {ex}")
 
+    _FAILED_EXACT_DATES.add(cache_key)
     return None
 
