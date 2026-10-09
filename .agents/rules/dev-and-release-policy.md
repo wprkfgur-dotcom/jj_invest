@@ -34,7 +34,11 @@ AI 어시스턴트는 모든 작업 시 이 원칙을 최우선으로 준수해�
 
 ## 3. 릴리스 정책 (Release & Distribution Policy)
 
-버전 릴리스(배포) 요청이 있을 때는 다음 절차를 단계별로 누락 없이 수행합니다.
+⚠️ **중요: AI 자율 작업 범위 및 사용자 승인 원칙**
+- **AI 자율 수행 범위**: 기능 개발/수정 완료 후 **단위 테스트(`python tools\run_app_tests.py`) 및 바이너리 빌드(`build_mobile_exe.py`, `build_arm64_release_apk.ps1`)까지만 자율적으로 진행**합니다.
+- **사용자 승인 필수**: **버전 번호 증가(Versioning), CHANGELOG 작성, Git 커밋 및 푸시, GitHub Release 배포는 AI가 임의로 진행하지 않고 반드시 사용자에게 의사를 묻고 사용자가 결정**합니다.
+
+사용자가 릴리스 또는 푸시를 요청/승인했을 때만 다음 절차를 단계별로 수행합니다.
 
 ### Step 1. 버전 번호 증가 (Version Bump - SemVer 규칙 준수)
 - **버전 표기 체계 (`MAJOR.MINOR.PATCH`)**:

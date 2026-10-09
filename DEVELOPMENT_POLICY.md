@@ -41,22 +41,21 @@
 
 ## 3. 릴리스 정책 (Release Workflow)
 
-릴리스 시에는 **Git 소스 반영 + 앱 버전 업 + 릴리스 노트 업데이트 + GitHub Release (APK & EXE 동시 업로드)**가 한 세트로 진행됩니다.
+> ⚠️ **중요: AI 자율 작업 범위 및 사용자 승인 원칙**
+> - **AI 자율 수행 범위**: 기능 개발 및 버그 수정 후 **단위 테스트(`python tools\run_app_tests.py`) 및 바이너리 빌드(`build_mobile_exe.py`, `build_arm64_release_apk.ps1`)까지만 자율적으로 진행**합니다.
+> - **사용자 승인 필수**: **버전 번호 증가(Versioning), CHANGELOG 작성, Git Commit & Push, GitHub Release 배포는 AI가 임의로 수행하지 않고 반드시 사용자에게 의사를 묻고 사용자가 결정**합니다.
 
 ```
-[개발 및 윈도우 모바일뷰 테스트] ──> [안드로이드 빌드 & 기기 검증]
-                                              │
-                                              ▼
-[버전 업 (SemVer 규칙 준수)]   ────> [CHANGELOG.md 작성]
-                                              │
-                                              ▼
-[Git Commit & Push (origin/main)] ──> [윈도우 모바일 EXE 빌드]
-                                              │
-                                              ▼
-                [GitHub Releases 듀얼 배포 (APK + EXE 동시 첨부)]
+[개발/수정 완료] ───> [단위 테스트 & 바이너리 빌드 (AI 자율 수행)]
+                                  │
+                                  ▼
+                    [사용자 확인 및 배포 승인 요청]
+                                  │
+                                  ▼ (사용자 승인 시)
+[버전 번호 증가 (SemVer)] ──> [CHANGELOG.md] ──> [Git Push] ──> [GitHub Release 듀얼 배포]
 ```
 
-### 단계별 절차:
+### 단계별 절차 (사용자 승인 후 진행):
 
 #### 1) 버전 번호 증가 (Version Bump - SemVer 규칙)
 - **버전 번호 관리 체계 (`MAJOR.MINOR.PATCH`)**:
