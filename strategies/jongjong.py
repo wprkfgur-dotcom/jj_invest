@@ -124,6 +124,50 @@ class JongJongStrategy(BaseStrategy):
         df['DB_Mode'] = db_mode
         return df
 
+    def determine_next_mode(self, closes_series: list, prev_mode: str = 'Normal', prev_flag: bool = False) -> str:
+        """
+        어제까지의 종가 시계열(closes_series)을 바탕으로 오늘(장전)의 시장 모드를 정밀 판정합니다.
+        엑셀 수식 및 prepare_indicators와 100% 동일한 규칙을 적용합니다:
+        - Risk-Off 플래그(prev_flag)가 활성화되어 있으면 'Riskoff'
+        - cond_safe: (not h[k-3] and h[k-2] and i[k-1] <= -0.03) or (g[k-2] and i[k-1] <= -0.08) -> 'Safe'
+        - cond_norm: (not g[k-2] and i[k-1] >= 0.058) or (not g[k-2] and j[k-1] >= 0.060) -> 'Normal'
+        - 그 외: 이전 모드(prev_mode) 유지
+        """
+        if prev_flag:
+            return 'Riskoff'
+
+        closes = [float(c) for c in closes_series if c is not None and not (isinstance(c, float) and (math.isnan(c) or math.isinf(c)))]
+        n = len(closes)
+        if n < 3:
+            return prev_mode
+
+        ma5 = [closes[k] if k < 4 else np.mean(closes[k-4:k+1]) for k in range(n)]
+        ma20 = [closes[k] if k < 19 else np.mean(closes[k-19:k+1]) for k in range(n)]
+        g_col = [bool(ma5[k] >= ma20[k]) for k in range(n)]
+        h_col = [bool(closes[k] >= ma20[k]) for k in range(n)]
+        i_col = [0.0 if k == 0 else (closes[k] / closes[k-1] - 1.0) for k in range(n)]
+        j_col = [0.0 if k < 2 else (closes[k] / closes[k-2] - 1.0) for k in range(n)]
+
+        # 오늘(인덱스 n)의 장전 주문표 산출을 위한 인덱스:
+        # k-1은 어제(마지막 완료 거래일, 인덱스 n-1)
+        # k-2는 그저께(인덱스 n-2)
+        # k-3은 3거래일 전(인덱스 n-3)
+        k_m1 = n - 1
+        k_m2 = n - 2
+        k_m3 = n - 3 if n >= 3 else 0
+
+        cond_safe = ((not h_col[k_m3]) and h_col[k_m2] and (i_col[k_m1] <= -0.03)) or \
+                    (g_col[k_m2] and (i_col[k_m1] <= -0.08))
+        cond_norm = ((not g_col[k_m2]) and (i_col[k_m1] >= 0.058)) or \
+                    ((not g_col[k_m2]) and (j_col[k_m1] >= 0.06))
+
+        if cond_safe:
+            return 'Safe'
+        elif cond_norm:
+            return 'Normal'
+        else:
+            return prev_mode
+
     def run(self, df_data: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
         df = self.prepare_indicators(df_data, start_date)
         valid_indices = df[(df['Date'] >= pd.Timestamp(start_date)) & (df['Date'] <= pd.Timestamp(end_date))].index

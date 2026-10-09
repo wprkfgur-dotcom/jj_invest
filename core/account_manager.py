@@ -811,22 +811,39 @@ class AccountManager:
             # 목표 운용일(target_order_date)의 시장 모드(Normal / Safe / Riskoff) 정밀 판별
             if acc.get('manual_mode'):
                 mode = acc['manual_mode']
-            elif df_market is not None and not df_market.empty:
-                try:
-                    df_prep = strat.prepare_indicators(df_market, start_date)
-                    match_row = df_prep[df_prep['Date'] <= pd.Timestamp(target_order_date)]
-                    if not match_row.empty:
-                        target_db_mode = match_row.iloc[-1].get('DB_Mode', 'Normal')
-                        last_rec_flag = bool(last_row.get('Flag', False)) if len(last_row) > 0 else False
-                        mode = 'Riskoff' if last_rec_flag else target_db_mode
-                    else:
-                        mode = str(last_row.get('Mode', 'Normal')) if len(last_row) > 0 else 'Normal'
-                except Exception:
-                    mode = str(last_row.get('Mode', 'Normal')) if len(last_row) > 0 else 'Normal'
             else:
-                if len(last_row) > 0 and float(last_row.get('Chg', 0.0)) >= 0.058:
-                    mode = 'Normal'
-                else:
+                try:
+                    from core.data import get_cached_candles_from_db
+                    # 1. 과거 시세 확보 (로컬 DB + trade_records 결합)
+                    closes_dict = {}
+                    df_cached = get_cached_candles_from_db(ticker, '2020-01-01', target_order_date)
+                    if not df_cached.empty:
+                        for _, crow in df_cached.iterrows():
+                            d_key = crow['Date'].strftime('%Y-%m-%d') if hasattr(crow['Date'], 'strftime') else str(crow['Date'])[:10]
+                            closes_dict[d_key] = float(crow['Close'])
+
+                    for r in records:
+                        r_d = str(r.get('Date', ''))[:10]
+                        if r_d and r.get('Close') is not None:
+                            closes_dict[r_d] = float(r['Close'])
+
+                    # 오늘(target_order_date) 장전이므로 오늘 이전(< target_order_date)의 마감된 거래일 종가만 시간순 추출
+                    valid_dates = sorted([d for d in closes_dict.keys() if d < target_order_date])
+                    closes_series = [closes_dict[d] for d in valid_dates]
+
+                    prev_mode = str(last_row.get('Mode', 'Normal')) if len(last_row) > 0 else 'Normal'
+                    prev_flag = bool(last_row.get('Flag', False)) if len(last_row) > 0 else False
+
+                    if len(closes_series) >= 3:
+                        mode = strat.determine_next_mode(
+                            closes_series=closes_series,
+                            prev_mode=prev_mode,
+                            prev_flag=prev_flag
+                        )
+                    else:
+                        mode = prev_mode
+                except Exception as ex:
+                    print(f"[{ticker}] 익일 모드 정밀 판정 안내 (fallback 사용): {ex}")
                     mode = str(last_row.get('Mode', 'Normal')) if len(last_row) > 0 else 'Normal'
 
             target_yield = strat.target_yields.get(mode, 0.0275)

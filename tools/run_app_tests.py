@@ -456,6 +456,46 @@ class TestJongJongTrader(unittest.TestCase):
         empty_box = build_empty_state(title="계좌 없음")
         self.assertIsInstance(empty_box, ft.Column)
 
+    def test_tc15_determine_next_mode_safe_transition(self):
+        """TC-15: 폭락장 시 종종이 익일 Safe 모드 전환 및 주문표 산출 무결성 검증"""
+        from strategies.jongjong import JongJongStrategy
+        from core.account_manager import AccountManager
+
+        strat = JongJongStrategy()
+        # 2026-10-02 ~ 2026-10-08 실제 시세 (10월 8일 -10.31% 폭락)
+        closes = [142.29, 147.00, 147.86, 153.69, 163.71, 164.27, 164.26, 158.91, 142.52]
+        # 10월 8일 시점에서 익일(10월 9일) 모드 판정
+        next_mode = strat.determine_next_mode(closes, prev_mode='Normal', prev_flag=False)
+        self.assertEqual(next_mode, 'Safe', "10월 8일 -10.31% 급락 후 10월 9일 모드는 Safe여야 합니다.")
+
+        # AccountManager 연동 테스트
+        am = AccountManager(filepath=self.test_accounts_file)
+        acc = am.add_account(
+            name="세이프테스트",
+            strategy="종종이 기본전략",
+            ticker="SOXL",
+            start_date="2026-09-28",
+            initial_seed=400000.0,
+            reserve_ratio=0.05
+        )
+        # 10월 8일 정산 기록 추가
+        rec_1008 = {
+            't': 0, 'Date': '2026-10-08', 'Close': 142.52, 'Chg': -0.1031, 'Mode': 'Normal',
+            'R': 282, 'BuyQty': 282, 'BuyPrice': 142.52, 'U': 146.44, 'Sold': False,
+            'Cash': 180922.79, 'Hold': 1428, 'Asset': 384441.35, 'AR': 380000.0, 'AK': 20000.0
+        }
+        acc['trade_records'] = [rec_1008]
+        acc['current_date'] = '2026-10-09'
+        acc['operational_state'] = 'WAITING_FOR_FILL'
+        am.save_accounts([acc])
+
+        dtl = am.compute_account_details(acc)
+        self.assertEqual(dtl['mode'], 'Safe')
+        self.assertAlmostEqual(dtl['daily_budget'], 380000.0 / 7.0, places=1)
+        # 매도 주문 중 146.44가 퉁치기 없이 그대로 목표가 매도로 유지되는지 확인
+        sell_prices = [float(s['price']) for s in dtl['sell_orders']]
+        self.assertIn(146.44, sell_prices)
+
 
 if __name__ == "__main__":
     print("=" * 65)

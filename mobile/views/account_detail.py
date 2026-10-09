@@ -463,12 +463,26 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
         )
     )
 
+    # 주문표 섹션 모드 배지 (Normal/Safe/Riskoff 구분)
+    order_mode_color = "#3B82F6" if mode == 'Normal' else ("#EAB308" if mode == 'Safe' else "#EF4444")
+    order_mode_badge = ft.Container(
+        content=ft.Row([
+            ft.Container(width=6, height=6, border_radius=3, bgcolor=order_mode_color),
+            ft.Text(f"{mode} 모드", size=11, weight=ft.FontWeight.BOLD, color=order_mode_color),
+        ], spacing=5, alignment=ft.MainAxisAlignment.CENTER),
+        bgcolor=ft.Colors.with_opacity(0.15, order_mode_color),
+        padding=ft.Padding.symmetric(horizontal=8, vertical=3.5),
+        border_radius=6,
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.35, order_mode_color))
+    )
+
     orders_section = ft.Column(
         controls=[
             build_section_header(
                 title=f"금일 매수·매도 주문표 ({target_date})",
                 icon=ft.Icons.RECEIPT_LONG,
                 title_size=14,
+                action=order_mode_badge,
             ),
             sell_box,
             buy_box
