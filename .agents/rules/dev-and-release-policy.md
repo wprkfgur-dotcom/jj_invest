@@ -13,30 +13,31 @@ AI 어시스턴트는 모든 작업 시 이 원칙을 최우선으로 준수해�
 
 ---
 
-## 2. 개발 및 검증 원칙 (Windows First -> Android Verification)
+## 2. 개발 및 검증 원칙 (Windows First Verification -> User Confirm -> Android Build)
 
-1. **개발은 윈도우(Windows) 모바일 뷰 환경을 기본으로 진행한다.**
+1. **개발 및 1차 검증은 윈도우(Windows) 모바일 뷰 환경으로만 진행한다.**
    - 코드 작성, 기능 추가, UI 수정, 버그 패치 등 모든 작업은 로컬 Windows 환경에서 먼저 실행하고 디버깅합니다.
    - 실행 스크립트:
      - 모바일 UI 로컬 프리뷰: `run_mobile.bat` 또는 `python mobile_app.py`
-   - 스마트폰 화면비(412x860) 프리뷰 창과 콘솔 로그 확인을 통해 로직 및 UI의 완전성을 1차 확보합니다.
+     - 단위 테스트 검증: `python tools\run_app_tests.py`
+     - 윈도우 실행파일 빌드: `python build_mobile_exe.py` 실행하여 `dist\JongJongTrader_Mobile.exe` 생성
+   - **중요**: 수정 직후에는 오직 **윈도우 실행파일(`dist\JongJongTrader_Mobile.exe`)만 빌드**하여 사용자에게 확인을 요청합니다. (사용자 컨펌 전에는 APK 빌드 및 버전 번호 증가 금지)
 
-2. **수정이 완료된 후 안드로이드(Android) 버전으로 빌드하여 검증한다.**
-   - 윈도우에서의 동작이 정상임을 확인한 후, 모바일 소스를 동기화하고 APK를 빌드합니다.
-   - 빌드 스크립트:
-     ```powershell
-     powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1
-     ```
-   - 산출물: `dist\JongJongTrader_ARM64.apk`에 생성 (루트 디렉토리에는 바이너리를 생성하지 않음).
-   - 실제 연결된 안드로이드 기기(`adb install -r dist\JongJongTrader_ARM64.apk`)에서 터치 동작, 레이아웃 반응형 크기, 네트워크 호출 및 다운로드 팝업 등을 최종 검증합니다.
+2. **사용자가 윈도우 버전으로 직접 확인하고 컨펌(승인)한 후에 릴리스를 진행한다.**
+   - 사용자의 확인 및 배포 승인이 떨어진 후 비로소:
+     1) 버전 번호 증가 (`core/app_update.py`, `pubspec.yaml`)
+     2) 안드로이드 APK 빌드 (`powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1`)
+     3) Git Commit & Push
+     4) GitHub Releases 배포
 
 ---
 
 ## 3. 릴리스 정책 (Release & Distribution Policy)
 
-⚠️ **중요: AI 자율 작업 범위 및 사용자 승인 원칙**
-- **AI 자율 수행 범위**: 기능 개발/수정 완료 후 **단위 테스트(`python tools\run_app_tests.py`) 및 바이너리 빌드(`build_mobile_exe.py`, `build_arm64_release_apk.ps1`)까지만 자율적으로 진행**합니다.
-- **사용자 승인 필수**: **버전 번호 증가(Versioning), CHANGELOG 작성, Git 커밋 및 푸시, GitHub Release 배포는 AI가 임의로 진행하지 않고 반드시 사용자에게 의사를 묻고 사용자가 결정**합니다.
+⚠️ **중요: AI 작업 절차 및 사용자 승인 원칙**
+- **1단계 (기능 개발/수정 완료 시)**: 단위 테스트(`python tools\run_app_tests.py`) 통과 후 **오직 윈도우 실행파일(`dist\JongJongTrader_Mobile.exe`)만 빌드**하고 사용자에게 검증을 요청합니다.
+- **2단계 (사용자 확인 및 컨펌)**: 사용자가 윈도우 환경에서 정상 작동 여부를 확인합니다.
+- **3단계 (사용자 승인 후)**: 버전 번호 증가, APK 빌드, Git 커밋/푸시, GitHub Release 발행을 일괄 진행합니다.
 
 사용자가 릴리스 또는 푸시를 요청/승인했을 때만 다음 절차를 단계별로 수행합니다.
 

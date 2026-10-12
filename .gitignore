@@ -54,7 +54,7 @@ htmlcov/
 *.log
 
 # Sensitive Account Data & Runtime State
-**/accounts.json
+**/accounts*.json
 **/accounts.backup.json
 **/cloud_sync_config.json
 **/app_update_config.json

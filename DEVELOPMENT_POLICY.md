@@ -24,25 +24,20 @@
   - `run_mobile.bat` (스마트폰 412x860 해상도 프리뷰 실행)
 - Python 콘솔 로그, 데이터 정산 로직, 구글 드라이브 동기화 등을 윈도우 환경에서 1차적으로 완벽하게 검증합니다.
 
-### 2.2 안드로이드 빌드 및 실기기 검증 (Android Verification)
-- 윈도우 환경에서의 수정 작업이 완전히 완료되면, 안드로이드 전용 ARM64 릴리스 APK를 빌드합니다.
-- **빌드 명령어**:
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\build_arm64_release_apk.ps1
-  ```
-- **빌드 산출물 위치**: `dist\JongJongTrader_ARM64.apk`
-- **실기기 설치 및 검증**:
-  ```powershell
-  adb install -r dist\JongJongTrader_ARM64.apk
-  ```
-- 모바일 화면 비율, 터치 이벤트, 알림/팝업, 파일 다운로드 등 모바일 고유 동작을 최종 확인합니다.
+### 2.2 윈도우 선검증 및 사용자 컨펌 원칙 (Windows First Verification -> User Confirm)
+- 모든 기능 추가 및 버그 수정 후에는 **단위 테스트 통과 후 오직 윈도우 실행파일(`dist\JongJongTrader_Mobile.exe`)만 빌드**합니다.
+- **빌드 명령어**: `python build_mobile_exe.py`
+- **사용자 컨펌 필수**: 사용자가 윈도우 실행파일로 직접 동작을 확인하고 최종 승인(컨펌)하기 전에는 APK 빌드 및 버전 번호 증가, Git Push를 절대 진행하지 않습니다.
+- 사용자의 확인 및 컨펌 완료 후에만 안드로이드 APK 빌드(`build_arm64_release_apk.ps1`) 및 Git Push, 릴리스 배포를 진행합니다.
 
 ---
 
 ## 3. 릴리스 정책 (Release Workflow)
 
-> ⚠️ **중요: AI 자율 작업 범위 및 사용자 승인 원칙**
-> - **AI 자율 수행 범위**: 기능 개발 및 버그 수정 후 **단위 테스트(`python tools\run_app_tests.py`) 및 바이너리 빌드(`build_mobile_exe.py`, `build_arm64_release_apk.ps1`)까지만 자율적으로 진행**합니다.
+> ⚠️ **중요: 단계별 작업 절차 및 사용자 승인 원칙**
+> - **1단계 (기능 수정 완료 시)**: 단위 테스트 통과 후 **오직 윈도우 실행파일(`dist\JongJongTrader_Mobile.exe`)만 빌드**하고 사용자에게 확인 요청.
+> - **2단계 (사용자 확인 및 컨펌)**: 사용자가 윈도우 환경에서 정상 작동 여부를 확인.
+> - **3단계 (사용자 승인 후)**: 버전 번호 증가, APK 빌드, Git 커밋/푸시, GitHub Release 발행을 일괄 진행.
 > - **사용자 승인 필수**: **버전 번호 증가(Versioning), CHANGELOG 작성, Git Commit & Push, GitHub Release 배포는 AI가 임의로 수행하지 않고 반드시 사용자에게 의사를 묻고 사용자가 결정**합니다.
 
 ```

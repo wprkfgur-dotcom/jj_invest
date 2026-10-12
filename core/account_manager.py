@@ -443,11 +443,9 @@ class AccountManager:
         if shares_to_sell > 0:
             unsold_lots = [r for r in records if r.get('R', 0) > 0 and not r.get('Sold', False)]
             def get_lot_u(lot):
-                raw_u = lot.get('U')
-                if raw_u is not None and not pd.isna(raw_u):
-                    return float(raw_u)
                 bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
-                lot_yield = get_target_yield(acc.get('strategy'), lot.get('Mode', 'Normal'))
+                lot_mode = str(lot.get('Mode', 'Normal')).capitalize()
+                lot_yield = get_target_yield(acc.get('strategy'), lot_mode)
                 return round_up(bp * (1.0 + lot_yield), 2)
 
             # 슬롯 매도 우선순위 정렬 (만기 및 목표가 도달 익절 우선, 낮은 목표가 순)
@@ -798,9 +796,11 @@ class AccountManager:
             for _, r_lot in unsold_df.iterrows():
                 h_days = len(df_res) - 1 - int(r_lot.get('t', 0))
                 d_str = r_lot['Date'].strftime('%m.%d') if hasattr(r_lot['Date'], 'strftime') else str(r_lot['Date'])
-                u_p = r_lot.get('U')
-                if u_p is None or pd.isna(u_p):
-                    u_p = round_up(float(r_lot['Close']) * (1.0 + strat.target_yields.get(r_lot.get('Mode', 'Normal'), 0.0275)), 2)
+                lot_mode = str(r_lot.get('Mode', 'Normal')).capitalize()
+                close_p = float(r_lot['Close'])
+                buy_p = float(r_lot.get('BuyPrice', close_p))
+                target_yield = strat.target_yields.get(lot_mode, 0.0275)
+                u_p = round_up(buy_p * (1.0 + target_yield), 2)
                 unsold_lots.append({
                     'date': d_str,
                     'R': int(r_lot['R']),
