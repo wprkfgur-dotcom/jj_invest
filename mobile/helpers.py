@@ -174,7 +174,7 @@ def compute_suggested_trades(
             u_val = lot.get('U')
             if u_val is None or pd.isna(u_val):
                 bp = float(lot.get('BuyPrice', lot.get('Close', close_p)))
-                t_yield = get_target_yield(strategy_name)
+                t_yield = get_target_yield(strategy_name, lot.get('Mode', 'Normal'))
                 u_val = bp * (1.0 + t_yield)
             else:
                 u_val = float(u_val)

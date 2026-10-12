@@ -12,11 +12,13 @@ from strategies.jongjong import JongJongStrategy
 from strategies.infinite_buying_v4 import InfiniteBuyingV4Strategy
 from strategies.vr_v5 import ValueRebalancingV5Strategy
 from strategies.buy_and_hold import BuyAndHoldStrategy
+from strategies.puddle import PuddleStrategy
 
 # 전략 종류 식별자
 JONGJONG = "jongjong"
 INFINITE = "infinite"
 VR = "vr"
+PUDDLE = "puddle"
 BNH = "bnh"
 
 # 계좌/백테스트에서 사용하는 표준 표시 이름
@@ -24,20 +26,27 @@ DISPLAY_NAMES = {
     JONGJONG: "종종이 기본전략",
     INFINITE: "무한매수법 v4.0",
     VR: "VR 5.0 (밸류리밸런싱)",
+    PUDDLE: "웅덩이 매매법",
 }
 
 # 계좌 생성 시 선택 가능한 전략 목록 (표시 순서)
-ACCOUNT_STRATEGY_OPTIONS = [DISPLAY_NAMES[JONGJONG], DISPLAY_NAMES[INFINITE], DISPLAY_NAMES[VR]]
+ACCOUNT_STRATEGY_OPTIONS = [DISPLAY_NAMES[JONGJONG], DISPLAY_NAMES[INFINITE], DISPLAY_NAMES[VR], DISPLAY_NAMES[PUDDLE]]
 
 # 슬롯 목표가 계산용 기본 목표 수익률
 TARGET_YIELD_JONGJONG = 0.0275
 TARGET_YIELD_DEFAULT = 0.05
 
+TARGET_YIELDS_JONGJONG = {
+    'Normal': 0.0275,
+    'Safe': 0.0025,
+    'Riskoff': 0.0070
+}
+
 
 def classify_strategy(name: Optional[str]) -> str:
     """전략 이름 문자열로 전략 종류를 판별합니다.
 
-    기존 분기 규칙과 동일한 우선순위를 따릅니다: 종종이 → 무한 → VR → 단순보유.
+    기존 분기 규칙과 동일한 우선순위를 따릅니다: 종종이 → 무한 → VR → 웅덩이 → 단순보유.
     """
     s = str(name or "")
     if "종종이" in s:
@@ -46,6 +55,8 @@ def classify_strategy(name: Optional[str]) -> str:
         return INFINITE
     if "VR" in s.upper():
         return VR
+    if "웅덩이" in s or "PUDDLE" in s.upper():
+        return PUDDLE
     return BNH
 
 
@@ -61,9 +72,18 @@ def is_infinite(name: Optional[str]) -> bool:
     return classify_strategy(name) == INFINITE
 
 
-def get_target_yield(name: Optional[str]) -> float:
-    """슬롯 목표가(U)가 없을 때 사용하는 기본 목표 수익률."""
-    return TARGET_YIELD_JONGJONG if is_jongjong(name) else TARGET_YIELD_DEFAULT
+def is_puddle(name: Optional[str]) -> bool:
+    return classify_strategy(name) == PUDDLE
+
+
+def get_target_yield(name: Optional[str], mode: Optional[str] = None) -> float:
+    """슬롯 목표가(U)가 없을 때 사용하는 목표 수익률 (전략 및 종종이 모드 반영)."""
+    if is_jongjong(name):
+        if mode:
+            m_cap = str(mode).capitalize()
+            return TARGET_YIELDS_JONGJONG.get(m_cap, TARGET_YIELD_JONGJONG)
+        return TARGET_YIELD_JONGJONG
+    return TARGET_YIELD_DEFAULT
 
 
 def bnh_display_name(ticker: str) -> str:
@@ -79,4 +99,6 @@ def create_backtest_strategy(name: str, ticker: str, capital: float):
         return InfiniteBuyingV4Strategy(ticker=ticker, initial_capital=capital, divisions=40)
     if kind == VR:
         return ValueRebalancingV5Strategy(ticker=ticker, initial_capital=capital, g_value=10.0, band_pct=0.15)
+    if kind == PUDDLE:
+        return PuddleStrategy(name="웅덩이 매매법", ticker=ticker, initial_capital=capital)
     return BuyAndHoldStrategy(name=f"{ticker} 단순보유", initial_capital=capital)

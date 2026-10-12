@@ -13,7 +13,7 @@ from datetime import datetime
 import flet as ft
 
 from core.data import get_stock_price_for_date, get_exact_stock_price_for_date
-from core.strategy_registry import is_vr, is_infinite, is_jongjong
+from core.strategy_registry import is_vr, is_infinite, is_jongjong, get_target_yield
 from core.trade_history import build_trade_rows
 from mobile.theme import (
     BG_DARK, SURFACE_CARD, BORDER_COLOR, ACCENT_BLUE,
@@ -139,7 +139,7 @@ def build_account_detail_view(app, acc: dict, dtl: dict) -> ft.Control:
             d_str = str(lot['Date'])[:10]
             cur_p = latest_price if latest_price > 0 else bp
             ret_loss = (cur_p / bp - 1.0) * 100.0
-            target_u = float(lot['U']) if lot.get('U') is not None else bp * 1.0275
+            target_u = float(lot['U']) if lot.get('U') is not None else round(bp * (1.0 + get_target_yield(strat, lot.get('Mode', 'Normal'))), 2)
             invest_amt = float(lot.get('S', bp * r_q))
 
             loss_color = PROFIT_GREEN if ret_loss >= 0 else LOSS_RED
